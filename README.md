@@ -1,2 +1,1 @@
-# animatch-ai
-animatch-ai anime recommender
+# AniMatch AI
