@@ -4,8 +4,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from fetch_anilist import clean_text, clean_record
 
-def test_clean_text_strips_source_credit():
-    assert clean_text("Great show. (Source: Crunchyroll)") == "Great show."
 
 def test_clean_text_strips_html():
     assert clean_text("A<br>B <i>C</i> &amp; D") == "A B C & D"
@@ -13,6 +11,11 @@ def test_clean_text_strips_html():
 
 def test_clean_text_handles_none():
     assert clean_text(None) == ""
+
+
+def test_clean_text_strips_source_credit():
+    assert clean_text("Great show. (Source: Crunchyroll)") == "Great show."
+    assert clean_text("Great show. [Written by MAL Rewrite]") == "Great show."
 
 
 def test_clean_record_handles_nulls_and_spoiler_tags():
