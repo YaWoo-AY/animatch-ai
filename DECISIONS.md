@@ -1,7 +1,7 @@
 # Decisions
 
 Short list of choices that shape the project, each with the reason and the cost.
-Newest decisions go in the relevant section; add a date when one changes.
+When a decision changes, edit it in place and add the date.
 
 ## Data scope
 
@@ -16,7 +16,7 @@ Newest decisions go in the relevant section; add a date when one changes.
 
 **Crawl is resumable.**
 - Raw records go to `data/raw_anime.jsonl` one per line, progress to `data/crawl_state.json`. Duplicate AniList IDs are dropped when building the clean file.
-- Why: a crash or rate limit should never lose a 5-minute crawl.
+- Re-running `python src/fetch_anilist.py --pages 100` re-cleans from the saved raw file with no network calls, so cleaning changes never need a recrawl.
 
 ## Identifiers
 
@@ -24,14 +24,55 @@ Newest decisions go in the relevant section; add a date when one changes.
 - 16 of 5,000 titles have no `idMal`, so a MAL-only key would break exclusion for them.
 - MAL watchlist imports match on `idMal`; AniList imports match on the AniList ID.
 
-## Text cleaning
+## Text cleaning and spoilers
 
 **Strip HTML, entities and source credits from synopses.**
 - Credit lines like "(Source: Crunchyroll)" are noise for embeddings and should not be quoted by the LLM.
 
-**Tags: drop spoiler-flagged tags and tags ranked below 60.**
-- Why: keeps spoilers out of anything shown to the LLM and removes low-confidence crowd tags.
-- Still open: a stoplist for structural tags like "Primarily Teen Cast".
+**Two tag fields: `tags` (safe to show) and `spoiler_tags` (retrieval only).**
+- `tags`: non-spoiler tags ranked 60 or higher.
+- `spoiler_tags`: spoiler-flagged tags ranked 60 or higher.
+- Why two: AniList flags many of the best tags as spoilers (Summer Time Rendering: Survival 100, Time Manipulation 97, Time Loop 95). Dropping them left only weak themes (Coastal, Rural, Shounen) and hurt retrieval.
+- **Rule: spoiler tags must never be shown to a user or included in the prompt of the LLM that writes pitches.** Pitch generation reads `tags` and the premise from `anime.json`, never Chroma's stored text. The stored text in the `spoilers` and `notitle_spoilers` collections contains spoiler tags, so those collections are for retrieval only.
+
+## Embeddings and search
+
+**Two models, compared: all-MiniLM-L6-v2 and bge-small-en-v1.5.**
+- Each model has its own ChromaDB collection, cosine distance, normalized vectors.
+- BGE uses the query prefix "Represent this sentence for searching relevant passages: ". MiniLM uses none.
+- Distances are not comparable across models (BGE roughly 0.29-0.32 and MiniLM 0.54-0.61 for similar-quality matches). Never share one distance cutoff between models, and never read a small gap between BGE distances as meaningful (several top results tie at 0.399-0.400).
+
+**Embedding text structure: title (optional), genres, themes, optional plot elements, then synopsis.**
+- Why this order: if a model truncates a long input it cuts the end of the synopsis, never the genres and themes. MiniLM truncates 6.5-8.8% of texts (limit 256 tokens); BGE 0.1% (limit 512).
+- Themes: up to 10 tags, after removing structural tags with a stoplist ("Primarily Teen Cast", "Male Protagonist", "Ensemble Cast", "Heterosexual" and similar). The stoplist applies to the embedding text only.
+- Plot elements: up to 8 spoiler tags, only in the `spoilers` variants.
+
+**Four embedding variants, one collection each.**
+
+| Variant | Title in text | Spoiler tags in text | Collection (per model) |
+|---|---|---|---|
+| base | yes | no | `anime_<model>` |
+| notitle | no | no | `anime_<model>_notitle` |
+| spoilers | yes | yes | `anime_<model>_spoilers` |
+| notitle_spoilers | no | yes | `anime_<model>_notitle_spoilers` |
+
+- Why variants: title words leaked into results (6 of 10 "Girl" titles for a query about a girl; 7 of 10 "Summer" titles among neighbours of Summer Time Rendering with MiniLM), and spoiler tags carry strong signal.
+- **Provisional default for dense retrieval: `notitle_spoilers`.** Evidence is thin (one query judged by eye: roughly 8 of 10 on target for "time loop" vs about 4 for base with BGE). Confirm with Recall@10 in week 3.
+- Cost of dropping the title: name lookups and titles that are the best clue (7th Time Loop) fall out. Plan: BM25 over titles alongside the dense search.
+- Collections are always rebuilt from scratch so they match `anime.json`.
+
+**Free-text search is a secondary feature; profile-based search is the main path.**
+- Small embedding models match topic words, not plot mechanics ("a student keeps waking up on the same morning" returns school shows). Item-to-item neighbours from a real title are much more sensible.
+- "Like X" queries use X's own vector as the seed and exclude X's franchise. They are not treated as free text.
+- "Shorter", "newer" and similar constraints go through filters (episode cap, year), not the query text.
+- Stretch: an LLM rewrites a described plot into tag vocabulary ("relives the same day" becomes "time loop") before searching.
+
+## Stored metadata
+
+**ChromaDB cannot store empty values, so missing numbers are stored as -1 and missing text as "".**
+- Covers episodes, year, score, mal_id, format, cover.
+- Filters rely on this: an episode cap requires `episodes >= 1`, which excludes titles with unknown episode counts (the rule below).
+- Genres are stored as one string joined by "|".
 
 ## Franchise grouping
 
@@ -53,6 +94,7 @@ Used to exclude a whole franchise once the user has watched part of it (no recom
 
 **Result**
 - 3,050 franchises, 815 with 2+ titles. Largest: Pokemon 36, Conan 29, Dragon Ball Z 28, Gundam UC 26. Gundam is split into UC plus separate timeline groups.
+- Franchise duplicates sit next to each other in search results, so a diversity pass is needed after retrieval.
 
 ## Missing values
 
@@ -64,7 +106,9 @@ Used to exclude a whole franchise once the user has watched part of it (no recom
 
 ## Open decisions
 
-- **Embedding models:** compare all-MiniLM-L6-v2 against a BGE or E5 model. Only 2.8% of synopses exceed MiniLM's length, so expect a small difference; report it honestly.
-- **Chroma index:** commit it to the repo or rebuild at startup? Depends on repo size and cold-start time on the demo host. Decide in week 1.
+- **Embedding choices (week 3, by Recall@10):** MiniLM vs BGE; title in text or not; spoiler tags in or out; minimum rank for spoiler tags (60 vs 80) or tag rank as a ranking weight.
+- **Hybrid retrieval:** BM25 over titles and tags, cross-encoder reranker, diversity pass.
+- **Query rewriting by an LLM:** stretch goal.
+- **Chroma index:** commit it to the repo or rebuild at startup? Depends on repo size and cold-start time on the demo host. Decide in week 1 of deployment planning.
 - **Hidden gems mode:** how strongly to down-weight popularity.
 - **Evaluation users:** collect 20-30 public watchlists starting in week 2; anonymize usernames in the repo.
