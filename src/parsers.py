@@ -258,7 +258,7 @@ def _get_jikan(path, params=None, max_retries=5):
     last = "no response"
     for attempt in range(max_retries):
         try:
-            r = requests.get(JIKAN_URL + path, params=params, timeout=30)
+            r = requests.get(JIKAN_URL + path, params=params, timeout=(10, 30))
         except requests.RequestException as e:
             last = str(e)
             time.sleep(2 ** attempt)
@@ -300,7 +300,13 @@ def fetch_jikan(username, max_pages=60, pause=1.1):
 
 def probe_jikan(username):
     """Print the raw shape of Jikan's response, so we can confirm the parser matches it."""
-    r = requests.get(f"{JIKAN_URL}/users/{quote(username)}/animelist", params={"page": 1}, timeout=30)
+    try:
+        r = requests.get(f"{JIKAN_URL}/users/{quote(username)}/animelist", params={"page": 1}, timeout=(10, 30))
+    except requests.RequestException as e:
+        print(f"Could not reach Jikan ({type(e).__name__}). This is a network problem on your side or Jikan's,")
+        print("not a parser problem. Try opening https://api.jikan.moe/v4/anime/1 in a browser,")
+        print("and check https://status.jikan.moe/ if it also fails there.")
+        return
     print("HTTP status:", r.status_code)
     try:
         body = r.json()
@@ -428,6 +434,8 @@ def main():
     ap.add_argument("platform", choices=["anilist", "mal", "mal-probe"])
     ap.add_argument("username")
     ap.add_argument("--refresh", action="store_true", help="ignore the cache")
+    ap.add_argument("--unmatched", action="store_true",
+                    help="list watched titles that are not in our index (with AniList links)")
     args = ap.parse_args()
 
     if args.platform == "mal-probe":
@@ -436,7 +444,7 @@ def main():
     try:
         entries = get_profile(args.platform, args.username, refresh=args.refresh)
     except UserNotFound as e:
-        sys.exit(f"User not found: {e}")
+        sys.exit(f"User not found on {args.platform}: \"{args.username}\". Check the spelling.")
     except PrivateList as e:
         sys.exit(f"Private list: {e}. Ask the user to make the list public, or use another profile.")
     except ProfileError as e:
@@ -445,6 +453,13 @@ def main():
         sys.exit("The list is empty (or has no anime entries).")
     matched, unmatched = match_to_index(entries, load_index())
     summarize(entries, matched, unmatched)
+    if args.unmatched:
+        shown = [e for e in unmatched if e["status"] in {"completed", "watching", "dropped"}]
+        print(f"\nNot in index, seen or dropped ({len(shown)}):")
+        for e in shown[:60]:
+            score = "-" if e["score"] is None else f"{e['score']:.1f}"
+            link = f"https://anilist.co/anime/{e['anilist_id']}" if e["anilist_id"] else f"mal id {e['mal_id']}"
+            print(f"  {e['status']:<9} score {score:>4}  {link}")
 
 
 if __name__ == "__main__":
