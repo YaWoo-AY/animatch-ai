@@ -1,15 +1,16 @@
-"""Day 4: type a query, see the closest titles. This is your first look at whether retrieval works.
+"""Type a query, see the closest titles. This is your first look at whether retrieval works.
 
 Run from the project root, after build_index.py:
     python src/search.py "slow-burn psychological mystery"
     python src/search.py "cozy slice of life with food" --model bge -k 5
     python src/search.py "time loop thriller" --max-episodes 26 --min-year 2010
     python src/search.py "heist with a found family" --model all     # both models, with overlap
+    python src/search.py "time loop thriller" --variant spoilers     # search a variant collection
 """
 import argparse
 import sys
 
-from build_index import CHROMA_DIR, MODELS, collection_name
+from build_index import CHROMA_DIR, MODELS, VARIANTS, collection_name
 
 _models = {}  # loaded models, so --model all does not reload them
 
@@ -33,7 +34,7 @@ def build_where(max_episodes=None, min_year=None, min_score=None):
     return conds[0] if len(conds) == 1 else {"$and": conds}
 
 
-def search(query: str, model_key: str, k: int = 10, where=None) -> list:
+def search(query: str, model_key: str, k: int = 10, where=None, variant: str = "base") -> list:
     """Return up to k results as dicts: title, year, format, episodes, score, distance."""
     import chromadb
     from sentence_transformers import SentenceTransformer
@@ -41,7 +42,8 @@ def search(query: str, model_key: str, k: int = 10, where=None) -> list:
     cfg = MODELS[model_key]
     if model_key not in _models:
         _models[model_key] = SentenceTransformer(cfg["hf_name"])
-    col = chromadb.PersistentClient(path=CHROMA_DIR).get_collection(collection_name(model_key))
+    col = chromadb.PersistentClient(path=CHROMA_DIR).get_collection(
+        collection_name(model_key, variant))
     emb = _models[model_key].encode([cfg["query_prefix"] + query], normalize_embeddings=True)
     res = col.query(query_embeddings=emb.tolist(), n_results=k, where=where)
     out = []
@@ -67,6 +69,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("query")
     ap.add_argument("--model", choices=list(MODELS) + ["all"], default="minilm")
+    ap.add_argument("--variant", choices=list(VARIANTS), default="base")
     ap.add_argument("-k", type=int, default=10)
     ap.add_argument("--max-episodes", type=int)
     ap.add_argument("--min-year", type=int)
@@ -77,8 +80,8 @@ def main():
     keys = list(MODELS) if args.model == "all" else [args.model]
     found = {}
     for key in keys:
-        print(f"\n--- {key} ---")
-        found[key] = search(args.query, key, args.k, where)
+        print(f"\n--- {key} / {args.variant} ---")
+        found[key] = search(args.query, key, args.k, where, args.variant)
         show(found[key])
     if len(keys) == 2:
         a, b = ({r["anilist_id"] for r in found[k]} for k in keys)

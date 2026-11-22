@@ -36,4 +36,5 @@ def test_clean_record_handles_nulls_and_spoiler_tags():
     assert rec["mal_id"] is None
     assert rec["synopsis"] == ""
     assert rec["tags"] == ["Time Loop"]
+    assert rec["spoiler_tags"] == ["Twist"]  # kept separately, for retrieval only
     assert rec["relations"] == []

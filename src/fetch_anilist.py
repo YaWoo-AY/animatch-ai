@@ -96,8 +96,12 @@ def clean_record(m: dict) -> dict:
         "title": title,
         "synopsis": clean_text(m["description"]),
         "genres": m["genres"] or [],
-        # keep spoiler-flagged tags out of anything shown to the LLM later
+        # Safe to show: non-spoiler tags only.
         "tags": [t["name"] for t in (m["tags"] or []) if not t["isMediaSpoiler"] and t["rank"] >= 60],
+        # Spoiler-flagged tags are often the most informative ones ("Time Loop" is a spoiler tag
+        # on Summer Time Rendering). Kept for RETRIEVAL ONLY: never show these to a user or put
+        # them in the prompt of the LLM that writes pitches.
+        "spoiler_tags": [t["name"] for t in (m["tags"] or []) if t["isMediaSpoiler"] and t["rank"] >= 60],
         "episodes": m["episodes"],
         "year": m["seasonYear"],
         "score": m["averageScore"],

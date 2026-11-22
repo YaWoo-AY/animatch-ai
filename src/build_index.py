@@ -1,11 +1,14 @@
-"""Day 4: embed every title and store it in ChromaDB, one collection per embedding model.
+"""Embed every title and store it in ChromaDB, one collection per (model, variant).
 
 Run from the project root, after franchise.py has written data/anime.json:
-    python src/build_index.py                  # build both models (a few minutes each on CPU)
-    python src/build_index.py --model minilm   # build just one
-    python src/build_index.py --limit 200      # quick test on the first 200 titles
+    python src/build_index.py                          # base variant, both models
+    python src/build_index.py --model bge              # one model
+    python src/build_index.py --variant notitle        # embed without the title
+    python src/build_index.py --variant spoilers       # add spoiler tags (retrieval only)
+    python src/build_index.py --limit 200              # quick test on the first 200 titles
 
-Why two models: comparing them is one of the ablations in the README.
+Why variants: title words leaked into the search results and spoiler-flagged tags (often the best
+signal, like "Time Loop") were missing. Each variant is one row in the ablation table later.
 """
 import argparse
 import json
@@ -29,6 +32,14 @@ MODELS = {
     },
 }
 
+# What goes into the text we embed. "base" is the original behaviour.
+VARIANTS = {
+    "base": {"title": True, "spoilers": False},
+    "notitle": {"title": False, "spoilers": False},
+    "spoilers": {"title": True, "spoilers": True},
+    "notitle_spoilers": {"title": False, "spoilers": True},
+}
+
 # Tags that describe the cast or format rather than the story. They add noise to embeddings
 # ("Primarily Teen Cast" matches half the catalogue), so they are left out of the embedding
 # text only. The tags in anime.json are untouched.
@@ -39,24 +50,33 @@ STOP_TAGS = {
     "Anime Influenced", "Heterosexual", "Cute Boys Doing Cute Things",
 }
 MAX_TAGS = 10
+MAX_SPOILER_TAGS = 8
 
 
-def collection_name(model_key: str) -> str:
-    return f"anime_{model_key}"
+def collection_name(model_key: str, variant: str = "base") -> str:
+    """The base variant keeps the original name, so existing collections still work."""
+    return f"anime_{model_key}" if variant == "base" else f"anime_{model_key}_{variant}"
 
 
-def build_text(rec: dict) -> str:
+def build_text(rec: dict, title: bool = True, spoilers: bool = False) -> str:
     """The text we embed for one title.
 
     Title, genres and themes come first and the synopsis last, so if a model truncates a long
     input it cuts the end of the synopsis, never the part that carries the genre and themes.
+
+    With spoilers=True the spoiler-flagged tags are added as "Plot elements". That text is for
+    retrieval only: it must never be shown to a user or sent to the LLM that writes pitches.
     """
     tags = [t for t in rec["tags"] if t not in STOP_TAGS][:MAX_TAGS]
-    parts = [rec["title"] + "."]
+    parts = [rec["title"] + "."] if title else []
     if rec["genres"]:
         parts.append("Genres: " + ", ".join(rec["genres"]) + ".")
     if tags:
         parts.append("Themes: " + ", ".join(tags) + ".")
+    if spoilers:
+        hidden = [t for t in rec.get("spoiler_tags", []) if t not in STOP_TAGS][:MAX_SPOILER_TAGS]
+        if hidden:
+            parts.append("Plot elements: " + ", ".join(hidden) + ".")
     parts.append(rec["synopsis"])
     return " ".join(parts)
 
@@ -83,15 +103,17 @@ def to_metadata(rec: dict) -> dict:
     }
 
 
-def build(model_key: str, records: list, batch: int = 64) -> None:
+def build(model_key: str, records: list, variant: str = "base", batch: int = 64) -> None:
     # Imported here so the helpers above can be tested without the heavy packages installed.
     import chromadb
     from sentence_transformers import SentenceTransformer
 
     cfg = MODELS[model_key]
-    print(f"\n=== {model_key}: {cfg['hf_name']} ===")
+    name = collection_name(model_key, variant)
+    print(f"\n=== {model_key} / {variant}: {cfg['hf_name']} -> '{name}' ===")
     model = SentenceTransformer(cfg["hf_name"])
-    texts = [cfg["doc_prefix"] + build_text(r) for r in records]
+    opts = VARIANTS[variant]
+    texts = [cfg["doc_prefix"] + build_text(r, **opts) for r in records]
 
     # Evidence for the embedding comparison: how many texts exceed the model's input limit?
     limit = model.max_seq_length
@@ -101,7 +123,6 @@ def build(model_key: str, records: list, batch: int = 64) -> None:
           f"({100 * over / len(texts):.1f}%). Longest: {max(lengths)} tokens.")
 
     client = chromadb.PersistentClient(path=CHROMA_DIR)
-    name = collection_name(model_key)
     try:
         client.delete_collection(name)  # always rebuild from scratch so it matches anime.json
     except Exception:
@@ -127,6 +148,7 @@ def build(model_key: str, records: list, batch: int = 64) -> None:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", choices=list(MODELS) + ["all"], default="all")
+    ap.add_argument("--variant", choices=list(VARIANTS), default="base")
     ap.add_argument("--limit", type=int, default=0, help="only index the first N titles (for testing)")
     args = ap.parse_args()
 
@@ -136,7 +158,7 @@ def main():
     print(f"Loaded {len(records)} titles from {ANIME_PATH}")
 
     for key in (MODELS if args.model == "all" else [args.model]):
-        build(key, records)
+        build(key, records, args.variant)
 
 
 if __name__ == "__main__":
