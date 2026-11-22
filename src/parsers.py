@@ -1,4 +1,4 @@
-"""Day 5: read a user's public anime list from AniList or MyAnimeList (through Jikan).
+"""Day 5: read a user's public anime list from AniList or MyAnimeList (official API).
 
 Every platform is turned into the same entry format:
     {"anilist_id": int | None, "mal_id": int | None, "status": str, "score": float | None, "progress": int}
@@ -8,13 +8,17 @@ score is 0-10 (None when the user did not rate the title).
 Run from the project root, in the terminal whose prompt starts with (.venv):
     python src/parsers.py anilist <username>
     python src/parsers.py mal <username>
-    python src/parsers.py mal-probe <username>     # print the raw Jikan response shape (to check it)
+    python src/parsers.py mal-probe <username>     # print the raw MAL response shape (to check it)
     python src/parsers.py anilist <username> --refresh   # ignore the cache
+
+MyAnimeList needs a free client ID (register an app at https://myanimelist.net/apiconfig). Put it in the
+environment variable MAL_CLIENT_ID, or in a line MAL_CLIENT_ID=... in the git-ignored .env file.
 
 Profiles are cached for 24 hours in data/cache/ (git-ignored), so repeat runs make no network calls.
 """
 import argparse
 import json
+import os
 import re
 import sys
 import time
@@ -25,7 +29,7 @@ from urllib.parse import quote
 import requests
 
 ANILIST_URL = "https://graphql.anilist.co"
-JIKAN_URL = "https://api.jikan.moe/v4"
+MAL_URL = "https://api.myanimelist.net/v2"
 ANIME_PATH = Path("data/anime.json")
 CACHE_DIR = Path("data/cache")
 CACHE_TTL = 24 * 3600  # seconds
@@ -64,10 +68,9 @@ ANILIST_STATUS = {
     "PLANNING": "planning",
 }
 
-JIKAN_STATUS = {
-    1: "watching", 2: "completed", 3: "paused", 4: "dropped", 6: "planning",
-    "watching": "watching", "currentlywatching": "watching", "completed": "completed",
-    "onhold": "paused", "dropped": "dropped", "plantowatch": "planning",
+MAL_STATUS = {
+    "watching": "watching", "completed": "completed", "on_hold": "paused",
+    "dropped": "dropped", "plan_to_watch": "planning",
 }
 
 
@@ -168,6 +171,34 @@ def _post_anilist(query, variables, max_retries=5):
     raise ApiError(f"AniList failed after {max_retries} attempts: {last}")
 
 
+TITLE_LOOKUP = """
+query ($ids: [Int], $perPage: Int) {
+  Page(perPage: $perPage) {
+    media(id_in: $ids, type: ANIME) {
+      id title { english romaji } format status popularity episodes seasonYear
+    }
+  }
+}
+"""
+
+
+def lookup_titles(ids, pause=0.8):
+    """Look up title, format and popularity for AniList ids (used to explain why titles are unmatched)."""
+    found = {}
+    ids = list(ids)
+    for i in range(0, len(ids), 50):
+        part = ids[i:i + 50]
+        data = _post_anilist(TITLE_LOOKUP, {"ids": part, "perPage": 50})
+        for m in (data.get("Page") or {}).get("media") or []:
+            t = m.get("title") or {}
+            found[m["id"]] = {"title": t.get("english") or t.get("romaji") or "?", "format": m.get("format"),
+                              "status": m.get("status"), "popularity": m.get("popularity"),
+                              "year": m.get("seasonYear")}
+        if i + 50 < len(ids):
+            time.sleep(pause)
+    return found
+
+
 def parse_anilist_collection(collection, into):
     """Add entries from one MediaListCollection to the dict `into` (keyed by AniList id)."""
     for group in (collection or {}).get("lists") or []:
@@ -211,101 +242,99 @@ def fetch_anilist(username, per_chunk=500, pause=1.0):
     return list(entries.values())
 
 
-# ---------------------------------------------------------------- MyAnimeList through Jikan
-# NOTE: the exact shape of Jikan's user-list response could not be checked against its docs
-# when this was written, so the parser accepts several field names. Run `mal-probe` once to
-# see the real shape, and send it to be checked.
+# ---------------------------------------------------------------- MyAnimeList (official API v2)
+# Verified on 2026-11-22 against a real public list: a client ID alone (header X-MAL-CLIENT-ID) is enough to
+# read another user's PUBLIC list, and an unknown user gives HTTP 404 {"error": "not_found"}.
+# Real item shape: {"node": {"id": 62524, "title": ..., "main_picture": ...},
+#                   "list_status": {"status": "watching", "score": 0, "num_episodes_watched": 5, ...}}
+# score 0 means unrated. Not confirmed: the exact reply for a private list (we assume HTTP 403).
 
-def _jikan_mal_id(item):
-    anime = item.get("anime")
-    if isinstance(anime, dict) and anime.get("mal_id") is not None:
-        return anime["mal_id"]
-    for key in ("anime_id", "mal_id"):
-        if item.get(key) is not None:
-            return item[key]
-    return None
+MAL_PAGE_SIZE = 100  # verified with limit=3; 100 is the API default page size, so it is safe
+
+class MissingClientId(ProfileError):
+    pass
 
 
-def _jikan_status(item):
-    value = item.get("watching_status", item.get("status"))
-    if isinstance(value, str):
-        if value.strip().isdigit():
-            value = int(value)
-        else:
-            value = re.sub(r"[^a-z]", "", value.lower())
-    return JIKAN_STATUS.get(value)
+def get_mal_client_id(env_path=".env"):
+    value = os.environ.get("MAL_CLIENT_ID", "").strip()
+    if not value and Path(env_path).exists():
+        for line in Path(env_path).read_text(encoding="utf-8").splitlines():
+            if line.strip().startswith("MAL_CLIENT_ID="):
+                value = line.split("=", 1)[1].strip().strip('"').strip("'")
+    if not value:
+        raise MissingClientId("no MAL client ID. Register a free app at https://myanimelist.net/apiconfig, "
+                              "then set MAL_CLIENT_ID (PowerShell: $env:MAL_CLIENT_ID=\"...\") "
+                              "or add MAL_CLIENT_ID=... to .env")
+    return value
 
 
-def parse_jikan_items(items):
+def parse_mal_items(items):
+    """Turn MAL v2 list items ({"node": {"id"}, "list_status": {...}}) into standard entries."""
     out = []
     for item in items or []:
-        mal_id, status = _jikan_mal_id(item), _jikan_status(item)
-        if mal_id is None or status is None:
+        node, ls = item.get("node") or {}, item.get("list_status") or {}
+        status = MAL_STATUS.get(ls.get("status"))
+        if node.get("id") is None or status is None:
             continue
-        progress = item.get("episodes_watched", item.get("num_watched_episodes")) or 0
-        out.append({
-            "anilist_id": None,
-            "mal_id": mal_id,
-            "status": status,
-            "score": _score(item.get("score")),
-            "progress": progress,
-        })
+        out.append({"anilist_id": None, "mal_id": int(node["id"]), "status": status,
+                    "score": _score(ls.get("score")), "progress": int(ls.get("num_episodes_watched") or 0)})
     return out
 
 
-def _get_jikan(path, params=None, max_retries=5):
-    """GET from Jikan with retries. Its limit is 3 requests per second and 60 per minute."""
+def _get_mal(url, client_id, params=None, max_retries=5):
+    """GET from the MAL API with retries. Its rate limit is not published; stay near 1 request per second."""
     last = "no response"
     for attempt in range(max_retries):
         try:
-            r = requests.get(JIKAN_URL + path, params=params, timeout=(10, 30))
+            r = requests.get(url, params=params, headers={"X-MAL-CLIENT-ID": client_id}, timeout=(10, 30))
         except requests.RequestException as e:
             last = str(e)
             time.sleep(2 ** attempt)
             continue
-        if r.status_code == 429:
-            last = "rate limited"
-            time.sleep(_retry_after(r, 5 * (attempt + 1)))
-            continue
-        if r.status_code >= 500:
+        if r.status_code == 429 or r.status_code >= 500:
             last = f"HTTP {r.status_code}"
-            time.sleep(2 ** attempt)
+            time.sleep(_retry_after(r, 2 ** attempt))
             continue
         if r.status_code == 404:
             raise UserNotFound("MyAnimeList user not found (check the spelling)")
         if r.status_code == 403:
-            raise PrivateList("this MyAnimeList list is private")
+            raise PrivateList("MyAnimeList refused access (HTTP 403): the list is probably private")
         try:
             body = r.json()
         except ValueError:
-            raise ApiError(f"Jikan sent a non-JSON reply (HTTP {r.status_code})")
-        if r.status_code >= 400:
-            raise ApiError(f"Jikan HTTP {r.status_code}: {body.get('message') or body}")
+            raise ApiError(f"MyAnimeList sent a non-JSON reply (HTTP {r.status_code})")
+        if r.status_code in (400, 401):
+            raise ApiError(f"MyAnimeList rejected the request (HTTP {r.status_code}): "
+                           f"{body.get('message') or body.get('error') or body}")
+        if r.status_code != 200:
+            raise ApiError(f"MyAnimeList HTTP {r.status_code}: {body.get('message') or body}")
         return body
-    raise ApiError(f"Jikan failed after {max_retries} attempts: {last}")
+    raise ApiError(f"MyAnimeList failed after {max_retries} attempts: {last}")
 
 
-def fetch_jikan(username, max_pages=60, pause=1.1):
-    """Fetch a public MyAnimeList anime list through Jikan. Returns a list of entries."""
-    entries, page = [], 1
-    while page <= max_pages:
-        body = _get_jikan(f"/users/{quote(username)}/animelist", {"page": page})
-        entries.extend(parse_jikan_items(body.get("data")))
-        if not (body.get("pagination") or {}).get("has_next_page"):
+def fetch_mal(username, client_id=None, limit=MAL_PAGE_SIZE, pause=1.0, max_pages=120):
+    """Fetch a public MyAnimeList anime list. Returns a list of standard entries."""
+    client_id = client_id or get_mal_client_id()
+    url, params = f"{MAL_URL}/users/{quote(username)}/animelist", {"fields": "list_status", "limit": limit}
+    entries = []
+    for _ in range(max_pages):
+        body = _get_mal(url, client_id, params)
+        entries.extend(parse_mal_items(body.get("data")))
+        url, params = (body.get("paging") or {}).get("next"), None  # "next" is a complete URL
+        if not url:
             break
-        page += 1
         time.sleep(pause)
     return entries
 
 
-def probe_jikan(username):
-    """Print the raw shape of Jikan's response, so we can confirm the parser matches it."""
+def probe_mal(username):
+    """Print the raw shape of MAL's response, so we can confirm the parser matches it."""
+    client_id = get_mal_client_id()
     try:
-        r = requests.get(f"{JIKAN_URL}/users/{quote(username)}/animelist", params={"page": 1}, timeout=(10, 30))
+        r = requests.get(f"{MAL_URL}/users/{quote(username)}/animelist", params={"fields": "list_status", "limit": 2},
+                         headers={"X-MAL-CLIENT-ID": client_id}, timeout=(10, 30))
     except requests.RequestException as e:
-        print(f"Could not reach Jikan ({type(e).__name__}). This is a network problem on your side or Jikan's,")
-        print("not a parser problem. Try opening https://api.jikan.moe/v4/anime/1 in a browser,")
-        print("and check https://status.jikan.moe/ if it also fails there.")
+        print(f"Could not reach MyAnimeList ({type(e).__name__}): {e}")
         return
     print("HTTP status:", r.status_code)
     try:
@@ -315,13 +344,13 @@ def probe_jikan(username):
         return
     if isinstance(body, dict):
         print("Top-level keys:", list(body.keys()))
-        print("pagination:", body.get("pagination"))
+        print("paging:", body.get("paging"))
         data = body.get("data")
         if isinstance(data, list) and data:
             print(f"data: list of {len(data)}; first entry:")
-            print(json.dumps(data[0], indent=2, ensure_ascii=False)[:1500])
+            print(json.dumps(data[0], indent=2, ensure_ascii=False)[:1200])
         else:
-            print("data:", str(data)[:300], "| message:", body.get("message"))
+            print("data:", str(data)[:300], "| error:", body.get("error"), body.get("message"))
     else:
         print(str(body)[:500])
 
@@ -353,7 +382,7 @@ def load_cache(path, ttl=CACHE_TTL, now=None):
     return blob["entries"] if age <= ttl else None
 
 
-FETCHERS = {"anilist": fetch_anilist, "mal": fetch_jikan}
+FETCHERS = {"anilist": fetch_anilist, "mal": fetch_mal}
 
 
 def get_profile(platform, username, refresh=False, cache_dir=CACHE_DIR, now=None):
@@ -439,7 +468,10 @@ def main():
     args = ap.parse_args()
 
     if args.platform == "mal-probe":
-        probe_jikan(args.username)
+        try:
+            probe_mal(args.username)
+        except MissingClientId as e:
+            sys.exit(f"Cannot probe: {e}")
         return
     try:
         entries = get_profile(args.platform, args.username, refresh=args.refresh)
@@ -456,10 +488,26 @@ def main():
     if args.unmatched:
         shown = [e for e in unmatched if e["status"] in {"completed", "watching", "dropped"}]
         print(f"\nNot in index, seen or dropped ({len(shown)}):")
-        for e in shown[:60]:
+        ids = [e["anilist_id"] for e in shown if e["anilist_id"]]
+        try:
+            info = lookup_titles(ids)
+        except ProfileError as e:
+            info = {}
+            print(f"  (could not look up titles: {e})")
+        formats = Counter()
+        for e in shown[:80]:
             score = "-" if e["score"] is None else f"{e['score']:.1f}"
-            link = f"https://anilist.co/anime/{e['anilist_id']}" if e["anilist_id"] else f"mal id {e['mal_id']}"
-            print(f"  {e['status']:<9} score {score:>4}  {link}")
+            meta = info.get(e["anilist_id"])
+            if meta:
+                formats[meta["format"]] += 1
+                print(f"  {e['status']:<9} {score:>4}  {meta['title'][:42]:<42} {str(meta['format']):<9} "
+                      f"{str(meta['year']):<5} pop {meta['popularity']}")
+            else:
+                link = (f"https://anilist.co/anime/{e['anilist_id']}" if e["anilist_id"]
+                        else f"https://myanimelist.net/anime/{e['mal_id']}")
+                print(f"  {e['status']:<9} {score:>4}  {link}")
+        if formats:
+            print("By format:", dict(formats))
 
 
 if __name__ == "__main__":

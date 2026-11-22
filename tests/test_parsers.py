@@ -7,7 +7,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import parsers
 from parsers import (ApiError, PrivateList, QueryRejected, UserNotFound, cache_path, classify_anilist_errors,
-                     get_profile, load_cache, match_to_index, parse_anilist_collection, parse_jikan_items,
+                     get_profile, load_cache, match_to_index, parse_anilist_collection, parse_mal_items,
                      save_cache)
 
 
@@ -143,48 +143,66 @@ def test_gives_up_after_repeated_server_errors():
             pass
 
 
-# ---- Jikan parsing and fetching ----
+# ---- MyAnimeList (official API) ----
 
-def test_jikan_parser_accepts_nested_and_flat_shapes_and_status_forms():
-    items = [
-        {"anime": {"mal_id": 1}, "score": 9, "watching_status": 2, "episodes_watched": 26},
-        {"anime_id": 2, "score": 0, "status": "On-Hold", "num_watched_episodes": 3},
-        {"anime": {"mal_id": 3}, "score": 7, "watching_status": "Plan to Watch"},
-        {"anime": {"mal_id": 4}, "score": 5, "watching_status": 4},
-        {"anime": {"mal_id": 5}, "watching_status": 99},   # unknown status: skipped
-        {"score": 8, "watching_status": 2},                # no id: skipped
-    ]
-    out = parse_jikan_items(items)
+def mal_item(mal_id, status="completed", score=8, watched=12):
+    return {"node": {"id": mal_id, "title": "x"},
+            "list_status": {"status": status, "score": score, "num_episodes_watched": watched}}
+
+
+def test_mal_parser_maps_statuses_and_scores():
+    items = [mal_item(1, "completed", 9, 26), mal_item(2, "on_hold", 0, 3), mal_item(3, "plan_to_watch", 0, 0),
+             mal_item(4, "dropped", 4, 2), mal_item(5, "watching", 7, 5),
+             mal_item(6, "mystery"),                       # unknown status: skipped
+             {"list_status": {"status": "completed"}}]     # no node id: skipped
+    out = parse_mal_items(items)
     assert [(e["mal_id"], e["status"]) for e in out] == [
-        (1, "completed"), (2, "paused"), (3, "planning"), (4, "dropped")]
-    assert out[0]["score"] == 9.0 and out[1]["score"] is None
+        (1, "completed"), (2, "paused"), (3, "planning"), (4, "dropped"), (5, "watching")]
+    assert out[0]["score"] == 9.0 and out[1]["score"] is None and out[0]["progress"] == 26
     assert all(e["anilist_id"] is None for e in out)
 
 
-def test_jikan_pages_are_followed():
-    pages = [FakeResponse(200, {"data": [{"anime": {"mal_id": 1}, "watching_status": 2, "score": 8}],
-                                "pagination": {"has_next_page": True}}),
-             FakeResponse(200, {"data": [{"anime": {"mal_id": 2}, "watching_status": 1, "score": 0}],
-                                "pagination": {"has_next_page": False}})]
+def test_mal_follows_next_urls_and_sends_the_client_id():
+    pages = [FakeResponse(200, {"data": [mal_item(1)], "paging": {"next": "https://api.myanimelist.net/v2/next?offset=1000"}}),
+             FakeResponse(200, {"data": [mal_item(2)], "paging": {}})]
     with mock.patch.object(parsers.requests, "get", side_effect=pages) as get, mock.patch.object(parsers.time, "sleep"):
-        entries = parsers.fetch_jikan("someone")
+        entries = parsers.fetch_mal("someone", client_id="abc")
     assert [e["mal_id"] for e in entries] == [1, 2]
-    assert get.call_args_list[1].kwargs["params"] == {"page": 2}
+    assert get.call_args_list[0].kwargs["headers"] == {"X-MAL-CLIENT-ID": "abc"}
+    assert get.call_args_list[1].args[0].endswith("offset=1000") and get.call_args_list[1].kwargs["params"] is None
 
 
-def test_jikan_404_and_403_raise_clear_errors():
-    with mock.patch.object(parsers.requests, "get", return_value=FakeResponse(404, {"message": "nope"})):
-        try:
-            parsers.fetch_jikan("x")
-            assert False
-        except UserNotFound:
-            pass
-    with mock.patch.object(parsers.requests, "get", return_value=FakeResponse(403, {"message": "private"})):
-        try:
-            parsers.fetch_jikan("x")
-            assert False
-        except PrivateList:
-            pass
+def test_mal_errors_are_clear():
+    cases = [(404, UserNotFound), (403, PrivateList), (401, ApiError), (400, ApiError)]
+    for status, expected in cases:
+        with mock.patch.object(parsers.requests, "get", return_value=FakeResponse(status, {"message": "m"})):
+            try:
+                parsers.fetch_mal("x", client_id="abc")
+                assert False, f"expected an error for {status}"
+            except expected:
+                pass
+
+
+def test_mal_retries_rate_limits():
+    replies = [FakeResponse(429, None), FakeResponse(200, {"data": [mal_item(1)], "paging": {}})]
+    with mock.patch.object(parsers.requests, "get", side_effect=replies) as get, mock.patch.object(parsers.time, "sleep"):
+        assert len(parsers.fetch_mal("x", client_id="abc")) == 1
+    assert get.call_count == 2
+
+
+def test_client_id_comes_from_env_then_dotenv_and_is_required():
+    with tempfile.TemporaryDirectory() as d:
+        env_file = Path(d) / ".env"
+        env_file.write_text('OTHER=1\nMAL_CLIENT_ID="from-file"\n', encoding="utf-8")
+        with mock.patch.dict(parsers.os.environ, {}, clear=True):
+            assert parsers.get_mal_client_id(env_file) == "from-file"
+            try:
+                parsers.get_mal_client_id(Path(d) / "missing.env")
+                assert False
+            except parsers.MissingClientId:
+                pass
+        with mock.patch.dict(parsers.os.environ, {"MAL_CLIENT_ID": "from-env"}):
+            assert parsers.get_mal_client_id(env_file) == "from-env"
 
 
 # ---- cache ----
@@ -245,3 +263,43 @@ def test_entries_without_any_id_are_unmatched_not_crashes():
     matched, unmatched = match_to_index(
         [{"anilist_id": None, "mal_id": None, "status": "completed", "score": None, "progress": 0}], make_index())
     assert matched == [] and len(unmatched) == 1
+
+
+def test_lookup_titles_batches_and_prefers_english_titles():
+    page = {"data": {"Page": {"media": [
+        {"id": 1, "title": {"english": "Show", "romaji": "Shou"}, "format": "TV_SHORT", "status": "FINISHED",
+         "popularity": 10, "seasonYear": 2020},
+        {"id": 2, "title": {"english": None, "romaji": "Namae"}, "format": "SPECIAL", "status": "FINISHED",
+         "popularity": 5, "seasonYear": None}]}}}
+    with mock.patch.object(parsers.requests, "post", return_value=FakeResponse(200, page)) as post, \
+            mock.patch.object(parsers.time, "sleep"):
+        found = parsers.lookup_titles(range(1, 121))
+    assert post.call_count == 3  # 120 ids -> batches of 50
+    assert found[1]["title"] == "Show" and found[2]["title"] == "Namae" and found[2]["format"] == "SPECIAL"
+
+
+def test_mal_parses_a_real_response():
+    """Trimmed copy of a real reply from api.myanimelist.net (client ID only, public list)."""
+    real = {"data": [
+        {"node": {"id": 62524, "title": "#Zombie Sagashitemasu",
+                  "main_picture": {"medium": "https://cdn.myanimelist.net/images/anime/1151/160025.jpg"}},
+         "list_status": {"status": "watching", "score": 0, "num_episodes_watched": 5, "is_rewatching": False,
+                         "updated_at": "2026-11-01T07:56:08+00:00"}},
+        {"node": {"id": 54041, "title": "16bit Sensation: Another Layer"},
+         "list_status": {"status": "completed", "score": 8, "num_episodes_watched": 13, "is_rewatching": False,
+                         "start_date": "2023-10-13", "finish_date": "2023-12-29"}}],
+        "paging": {"next": "https://api.myanimelist.net/v2/users/yawoo/animelist?offset=3&limit=3&fields=list_status"}}
+    out = parse_mal_items(real["data"])
+    assert out == [
+        {"anilist_id": None, "mal_id": 62524, "status": "watching", "score": None, "progress": 5},
+        {"anilist_id": None, "mal_id": 54041, "status": "completed", "score": 8.0, "progress": 13}]
+
+
+def test_mal_unknown_user_message_is_a_404():
+    with mock.patch.object(parsers.requests, "get",
+                           return_value=FakeResponse(404, {"message": "", "error": "not_found"})):
+        try:
+            parsers.fetch_mal("nobody", client_id="abc")
+        except UserNotFound:
+            return
+    raise AssertionError("expected UserNotFound")
