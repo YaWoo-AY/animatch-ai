@@ -104,6 +104,32 @@ Used to exclude a whole franchise once the user has watched part of it (no recom
 **Null score or year.**
 - After the status filter, remaining null scores should be rare. Handle them at ranking time (treat as no score signal, do not rank them as zero).
 
+## Profile import (Day 5)
+
+**AniList is the primary source, the official MyAnimeList API is the second.**
+- Why AniList first: GraphQL, no key needed, one query returns the whole list including custom lists, and the crawl already uses AniList ids.
+- Why the official MAL API: a free client ID is enough to read a public list (checked with a real request). It is a supported product, not a scraper.
+- Cost: MAL needs a client ID, kept in `MAL_CLIENT_ID` or the git-ignored `.env`. Private lists cannot be read from either platform.
+
+**Not using Jikan or its replacements.**
+- The Jikan public API was discontinued on 1 October 2026.
+- Tenrai covers the catalogue only; its docs say to use the official MAL API for user data.
+- Jikan-Edge is a single-developer scraper on Cloudflare Workers, and I never confirmed its list endpoint. Self-hosting Jikan needs MongoDB and a server for a feature the official API already provides, and it still scrapes MAL.
+- Rule I took from this: a project that depends on a free third-party scraper can break without warning. Prefer official APIs for anything the demo needs.
+
+**One standard entry format, one fetcher per platform.**
+- `{anilist_id, mal_id, status, score, progress}`; adding a platform means one new function and one line in `FETCHERS`.
+
+**Scores: 0 means unrated, stored as None.**
+- 79% of my own entries are unrated, so unrated completed titles must still count, as a weaker positive signal than a high rating. Designed in Day 6.
+
+**Cache profiles for 24 hours.**
+- Protects the rate limits and makes reruns instant. `--refresh` forces a fetch. The cache is in `data/cache/`, which is git-ignored.
+
+**Titles not in the index are ignored for recommendations.**
+- They cannot be recommended and cannot block their franchise from being suggested. Measured on a real list: 8% of entries, but 62% of those are shorts and specials excluded on purpose, so the real gap is about 2%.
+- Not widening the crawl for now. Revisit if the evaluation shows missing history hurting Recall@10.
+
 ## Open decisions
 
 - **Embedding choices (week 3, by Recall@10):** MiniLM vs BGE; title in text or not; spoiler tags in or out; minimum rank for spoiler tags (60 vs 80) or tag rank as a ranking weight.
@@ -112,3 +138,5 @@ Used to exclude a whole franchise once the user has watched part of it (no recom
 - **Chroma index:** commit it to the repo or rebuild at startup? Depends on repo size and cold-start time on the demo host. Decide in week 1 of deployment planning.
 - **Hidden gems mode:** how strongly to down-weight popularity.
 - **Evaluation users:** collect 20-30 public watchlists starting in week 2; anonymize usernames in the repo.
+- **Shorts and specials in seen history:** TV_SHORT and SPECIAL titles are not indexed, so having watched one does not mark its franchise as seen. Options: ignore, or index them only for exclusion and never recommend them. Decide with the exclusion set (Day 6).
+- **Private lists:** confirm the error replies from AniList and MAL, then make the demo message friendlier.

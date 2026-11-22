@@ -3,6 +3,34 @@
 A running log of what I tried, what surprised me, and what I changed.
 Newest entries go at the top. This becomes the "What failed and what I'd change" section of the README.
 
+## 2026-11-22 (Day 5): reading watchlists from AniList and MyAnimeList
+
+**What I did**
+- Wrote `src/parsers.py`. Both platforms become the same entry: `{anilist_id, mal_id, status, score, progress}`, with statuses completed, watching, paused, dropped, planning.
+- AniList: one `MediaListCollection` query (custom lists included, because entries hidden from the status lists only appear there), deduped by media id, scores as `POINT_10_DECIMAL` where 0 means unrated (stored as None). Falls back to a plain query if the chunked one is rejected.
+- MyAnimeList: the official API v2 with a client ID only (header `X-MAL-CLIENT-ID`), following `paging.next`, 100 entries per page, about 1 request per second.
+- Shared: retry with backoff on 429 and 5xx (honours Retry-After), clear errors (user not found, private list, API error, missing client ID), a 24-hour disk cache in `data/cache/` (git-ignored), and matching to the index by AniList id then MAL id.
+- Added `--unmatched`, which looks up the title, format and popularity of titles that are not in the index. 60 tests pass, all offline with mocked HTTP.
+
+**Results on my own lists**
+- AniList: 1,040 entries (867 completed, 48 watching, 84 planning, 41 dropped); 956 match the index (91.9%).
+- MyAnimeList: 964 entries; 887 match (92.0%). Both give the same top-rated titles, so scores and id matching are right. The two lists differ by about 76 entries because I keep them separately.
+- Only 209 of 1,040 AniList entries have a score (831 completed titles are unrated). A taste vector built from ratings alone would see 20% of my history.
+- Why 52 seen or dropped titles are not in the index: 32 (62%) are SPECIAL (10) or TV_SHORT (22), formats the crawl excludes on purpose. Of the other 20, four are very popular shows (popularity 79k to 151k) that I believe the adult-content filter removed (not checked), and 16 have popularity below roughly 5,000, so they fall outside the top-5,000 crawl. Real gap: about 20 of 1,040 entries (2%), and only 7 of the 52 carry a score.
+
+**What failed**
+- I built the MyAnimeList import on Jikan, and it timed out. I first called it a network problem. It was not: the Jikan public API was discontinued on 1 October 2026 (maintainer announcement, jikan-rest issue 613). I had written a parser against a response shape I never saw.
+- Lesson: before writing a parser for a third-party API, make one real request and look at the raw response. After that I tested the official MAL API with one curl call, saw the real shape, and only then wrote the parser, with a test built from the real response.
+
+**What surprised me**
+- A client ID alone is enough to read another person's public MyAnimeList list. I had read conflicting claims that it needs OAuth, so I tested it instead of assuming.
+- Most of the "missing" titles are not a coverage bug. They are shorts and specials I chose not to index.
+
+**Still open**
+- The exact reply for a private MAL list (assumed HTTP 403) and for a private AniList list are untested.
+- Whether shorts and specials should count as "seen" for the exclusion set (see DECISIONS).
+- Collect 20-30 public usernames for the evaluation.
+
 ## 2026-11-22 (Day 4): embeddings, ChromaDB and first searches
 
 **What I did**
