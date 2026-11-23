@@ -135,7 +135,7 @@ def build_taste(matched, embeddings, episodes_by_id=None, unrated_share=0.35, al
     rated_mass = sum(o.weight for o in pos if o.rated)
     unrated_mass = sum(o.weight for o in pos if not o.rated)
     scale = 1.0
-    if rated_mass > 0 and unrated_mass > 0:
+    if rated_mass > 0 and unrated_mass > 0 and unrated_share < 1:   # share >= 1 means no cap
         allowed = unrated_share / (1 - unrated_share) * rated_mass
         if unrated_mass > allowed:
             scale = allowed / unrated_mass
