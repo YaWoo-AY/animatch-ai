@@ -132,6 +132,8 @@ Used to exclude a whole franchise once the user has watched part of it (no recom
 
 ## Taste vector and exclusion (Step 6)
 
+- **Weights per entry:** rated 8 to 10 gives (score - 5) / 5; 6 to 7.9 gives 0; 5 or lower is negative. With no score: completed +0.3, watching +0.15, dropped -0.6 (or -0.25 once more than half the episodes were watched), paused and planning 0. A score always beats the status.
+- **Vector:** unit(positive centroid) minus alpha times unit(negative centroid), alpha 0.3, then normalised. Alpha and the share cap are guesses to be tuned with the harness.
 - **Seen means whole franchises.** Completed, watching, paused and dropped hide the franchise. Plan-to-watch does not, because it is a candidate the user already likes the look of.
 - **Unrated titles count, weakly, with a cap.** Many people rate a fifth of their list. Without a cap, hundreds of unrated completed titles would outvote a few dozen deliberate high ratings. Share capped at 35%; this is a starting value, to be tuned.
 - **One vote per franchise.** Five seasons are one observation.
@@ -141,6 +143,7 @@ Used to exclude a whole franchise once the user has watched part of it (no recom
 ## Evaluation protocol (Step 7)
 
 - **Leave-one-out on whole franchises.** Hide a franchise rated 8 or higher, build from the rest, rank the hidden franchise among all unseen franchises. Averaged per user, with intervals from resampling users, so a user with 1,000 liked titles cannot dominate.
+- **Method options in `evaluate.py`** (after `@`, combinable): `alpha` weight of the dislike vector; `share` largest share of liked weight that unrated titles may carry (0 ignores them, 1 removes the cap); `center` 1 subtracts the index's average vector first; `knn` K scores a title by its K nearest liked franchises instead of their average; `pop` w adds w times standardised log popularity to the standardised similarity; `genre` w also scores with the genre/tag representation and adds w times its standardised score. Index variants are written `minilm/notitle` and so on.
 - **Two views, both reported.** All franchises, and with the 300 or 1,000 most popular removed. The first rewards recommending what everyone watches (popularity alone gets 19.7%); the second asks whether the system finds less obvious titles. I decided to report both before seeing the second.
 - **Dev set and test set.** 25 users to compare methods on, 25 different users reserved for one final run. Tuning on the test set is not allowed. If I change the configuration after looking at the test results, the test set is spent and a new one must be sampled.
 - **Users are anonymous and local.** Ids, statuses and scores only, in the git-ignored `data/`. AniList's terms forbid mass collection, so the sets stay small.
