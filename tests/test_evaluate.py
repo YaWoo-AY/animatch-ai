@@ -128,6 +128,8 @@ def test_liked_franchises_need_a_rating_of_eight():
 def test_parse_method():
     assert ev.parse_method("minilm") == ("minilm", "base", {})
     assert ev.parse_method("bge/notitle@alpha=0.0@share=1") == ("bge", "notitle", {"alpha": 0.0, "share": 1.0})
+    assert ev.parse_method("minilm@center=1@knn=5@pop=0.5")[2] == {"center": 1.0, "knn": 5.0, "pop": 0.5}
+    assert ev.parse_method("minilm@genre=1")[2] == {"genre": 1.0}
     with pytest.raises(SystemExit):
         ev.parse_method("minilm@beta=2")
 
@@ -183,3 +185,121 @@ def test_summary_table_prints(capsys):
     ev.print_table(ev.summarize({"m": {"u001": [1, 20, 60]}}))
     out = capsys.readouterr().out
     assert "Recall@10" in out and "m" in out
+
+
+# ---- the experiment options: center, knn, pop ----
+
+def test_centering_removes_the_shared_component_and_keeps_unit_rows():
+    catalog, M = make_world()
+    common = np.ones(3) / np.sqrt(3)
+    shifted = M + 5 * common
+    shifted /= np.linalg.norm(shifted, axis=1, keepdims=True)
+    c = ev.centered(shifted)
+    assert np.allclose(np.linalg.norm(c, axis=1), 1.0)
+    assert (shifted @ shifted.T).mean() > 0.9 and abs((c @ c.T).mean()) < 0.4
+
+
+def test_knn_scoring_ranks_a_user_with_two_tastes_correctly():
+    catalog, M = make_world()
+    # likes 8 franchises of topic 0 and 4 of topic 1
+    user = ev.User("u001", [entry(catalog, 2 * k) for k in range(8)] + [entry(catalog, 20 + 2 * k) for k in range(4)])
+    s = scorers(catalog, M, "minilm@knn=3", "minilm@center=1", "minilm@knn=3@center=1")
+    ranks, fb = ev.evaluate([user], catalog, s, per_user=12, log=lambda *_: None)
+    for spec in s:
+        assert fb[spec] == 0
+        assert np.mean(ranks[spec]["u001"]) < 8             # topic 2 (10 franchises) stays behind
+
+
+def test_knn_larger_than_the_number_of_liked_franchises_still_works():
+    catalog, M = make_world()
+    user = ev.User("u001", [entry(catalog, 0), entry(catalog, 2), entry(catalog, 4)])
+    ranks, _ = ev.evaluate([user], catalog, scorers(catalog, M, "minilm@knn=50"), per_user=3, log=lambda *_: None)
+    assert len(ranks["minilm@knn=50"]["u001"]) == 3
+
+
+def test_a_huge_popularity_weight_turns_the_method_into_the_popularity_baseline():
+    catalog, M = make_world()
+    s = scorers(catalog, M, "popularity", "minilm@pop=1000")
+    ranks, _ = ev.evaluate([topic0_fan(catalog)], catalog, s, per_user=9, log=lambda *_: None)
+    assert ranks["minilm@pop=1000"]["u001"] == ranks["popularity"]["u001"]
+
+
+def test_a_modest_popularity_weight_changes_the_ranking_but_keeps_taste_in_charge():
+    catalog, M = make_world()
+    s = scorers(catalog, M, "minilm", "minilm@pop=0.2")
+    ranks, _ = ev.evaluate([topic0_fan(catalog)], catalog, s, per_user=9, log=lambda *_: None)
+    assert max(ranks["minilm@pop=0.2"]["u001"]) <= 3
+
+
+def test_liked_vectors_apply_the_unrated_cap():
+    emb = {1: np.array([1.0, 0]), 2: np.array([0, 1.0])}
+    matched = [{"anilist_id": 1, "franchise_id": 1, "status": "completed", "score": 10.0, "progress": 1, "title": "a"},
+               {"anilist_id": 2, "franchise_id": 2, "status": "completed", "score": None, "progress": 1, "title": "b"}]
+    t = taste.build_taste(matched, emb, unrated_share=0.2)
+    V, w = taste.liked_vectors(t)
+    assert V.shape == (2, 2) and w.max() == 1.0 and w.min() < taste.UNRATED_COMPLETED
+
+
+# ---- the tail view ----
+
+def test_head_franchises_are_the_most_popular_ones():
+    catalog, _ = make_world()
+    head = ev.head_franchises(catalog, 5)
+    assert len(head) == 5 and head <= {21, 22, 23, 24, 25, 26, 27, 28, 29, 30}   # topic 2 is the most popular
+    assert ev.head_franchises(catalog, 0) == set()
+
+
+def test_tail_view_removes_head_franchises_from_targets_and_candidates():
+    catalog, M = make_world()
+    head = ev.head_franchises(catalog, 10)
+    # the user rated 9 franchises of topic 0 and the 3 most popular ones of topic 2
+    user = ev.User("u001", [entry(catalog, 2 * k) for k in range(9)] +
+                   [entry(catalog, 40 + 2 * k) for k in (9, 8, 7)])
+    heldout_seen = []
+
+    def spy(visible, rng):
+        return catalog.popularity
+
+    ranks, _ = ev.evaluate([user], catalog, {"spy": spy}, per_user=50, log=lambda *_: None, tail=10)
+    assert len(ranks["spy"]["u001"]) == 9                       # the three head franchises were skipped as targets
+    assert max(ranks["spy"]["u001"]) <= catalog.n_franchises - len(head)
+
+
+def test_users_with_no_liked_tail_franchise_are_skipped_not_crashed():
+    catalog, M = make_world()
+    user = ev.User("u001", [entry(catalog, 58)])                 # only liked franchise is in the head
+    lines = []
+    ranks, _ = ev.evaluate([user], catalog, scorers(catalog, M, "popularity"), per_user=5, tail=10,
+                           log=lines.append)
+    assert ranks["popularity"] == {} and any("skipped" in l for l in lines)
+
+
+def test_popularity_gets_no_free_wins_in_the_tail_view():
+    catalog, M = make_world()
+    s = scorers(catalog, M, "popularity", "minilm")
+    ranks, _ = ev.evaluate([topic0_fan(catalog)], catalog, s, per_user=9, log=lambda *_: None, tail=15)
+    assert max(ranks["minilm"]["u001"]) <= 2                      # taste still finds the (unpopular) topic 0
+    assert np.mean(ranks["popularity"]["u001"]) > 5
+
+
+# ---- fusing text embeddings with tags ----
+
+def test_genre_fusion_runs_and_keeps_the_right_topic_on_top():
+    catalog, M = make_world()
+    G = ev.genre_matrix(catalog.records)
+    pick = lambda name, variant: G if name == "genre" else M
+    s = {spec: ev.make_scorer(spec, catalog, pick) for spec in ("minilm@genre=1", "minilm@genre=1000", "genre")}
+    ranks, fb = ev.evaluate([topic0_fan(catalog)], catalog, s, per_user=9, log=lambda *_: None)
+    # only two topic-0 franchises are ever unseen, so a method that keeps the topic right ranks them 1 or 2
+    for spec in ("minilm@genre=1", "minilm@genre=1000", "genre"):
+        assert max(ranks[spec]["u001"]) <= 2
+    assert fb["minilm@genre=1"] == 0
+
+
+def test_users_dir_is_read_from_the_folder_given(tmp_path):
+    import json
+    entries = [{"anilist_id": 1, "mal_id": None, "status": "completed", "score": 9.0, "progress": 12}]
+    (tmp_path / "u001.json").write_text(json.dumps({"id": "u001", "stats": {}, "entries": entries}))
+    index = {"by_anilist": {1: {"anilist_id": 1, "mal_id": None, "franchise_id": 1, "title": "T"}}, "by_mal": {}}
+    users = ev.load_users(index, tmp_path)
+    assert [u.id for u in users] == ["u001"] and len(users[0].matched) == 1

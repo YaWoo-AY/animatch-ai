@@ -4,6 +4,8 @@ Run from the project root, in the (.venv) terminal:
     python src/sample_users.py --probe                       # 1. check the two AniList queries work
     python src/sample_users.py --target 25 --exclude yawoo   # 2. sample until 25 users qualify
     python src/sample_users.py --report                      # 3. summarize what was collected
+    # a second, untouched set for the final test (nobody from the first set is sampled again):
+    python src/sample_users.py --target 25 --out data/test_users --skip-from data/eval_users --exclude yawoo
 
 What it does: reads the recent-activity feed (people who updated their anime list lately), picks
 candidates at random, downloads each candidate's public list, and keeps the user only if the list is
@@ -132,7 +134,7 @@ def save_user(out_dir, number, entries, stats):
 # ---------------------------------------------------------------- the sampling loop
 
 def sample(candidates, fetch, index, out_dir=OUT_DIR, target=25, exclude=(), seed=0, pause=2.5,
-           sleep=time.sleep, log=print, **limits):
+           sleep=time.sleep, log=print, skip_ids=(), **limits):
     """Download candidates in random order until `target` qualifying lists are saved.
 
     `fetch(name)` returns a list of entries or raises parsers.ProfileError. Returns the number of
@@ -140,7 +142,9 @@ def sample(candidates, fetch, index, out_dir=OUT_DIR, target=25, exclude=(), see
     """
     checked = load_checked(out_dir)
     excluded = {n.lower() for n in exclude}
-    pool = [c for c in candidates if c["id"] not in checked and c["name"].lower() not in excluded]
+    skip_ids = set(skip_ids)   # people already in another set (e.g. the dev set) must not enter this one
+    pool = [c for c in candidates if c["id"] not in checked and c["id"] not in skip_ids
+            and c["name"].lower() not in excluded]
     random.Random(seed).shuffle(pool)
     have = len(saved_users(out_dir))
     tried = 0
@@ -205,6 +209,9 @@ def main():
     ap.add_argument("--probe", action="store_true", help="test the AniList queries and exit")
     ap.add_argument("--report", action="store_true", help="summarize saved users and exit")
     ap.add_argument("--target", type=int, default=25, help="stop when this many users are saved")
+    ap.add_argument("--out", default=str(OUT_DIR), help="folder for the saved users (default data/eval_users)")
+    ap.add_argument("--skip-from", action="append", default=[],
+                    help="another users folder whose people must not be sampled again (repeatable)")
     ap.add_argument("--strategy", choices=list(STRATEGIES), default="activity")
     ap.add_argument("--pages", type=int, default=6, help="feed pages to read for candidates (50 per page)")
     ap.add_argument("--exclude", default="", help="comma-separated usernames to skip (e.g. your own)")
@@ -217,8 +224,9 @@ def main():
 
     if args.probe:
         return probe()
+    out_dir = Path(args.out)
     if args.report:
-        return report()
+        return report(out_dir)
 
     index = parsers.load_index()
     print(f"Reading up to {args.pages} pages of the '{args.strategy}' feed...")
@@ -232,17 +240,20 @@ def main():
           f"(rated >= {args.min_rated}, rated 8+ >= {args.min_liked}, in index >= {args.min_matched}).")
 
     fetch = lambda name: parsers.fetch_anilist(name, pause=args.pause)   # not get_profile: no username in the cache
+    skip = set()
+    for other in args.skip_from:
+        skip |= load_checked(other)
     try:
-        have = sample(candidates, fetch, index, OUT_DIR, args.target, args.exclude.split(","), args.seed,
-                      args.pause, min_rated=args.min_rated, min_liked=args.min_liked,
+        have = sample(candidates, fetch, index, out_dir, args.target, args.exclude.split(","), args.seed,
+                      args.pause, skip_ids=skip, min_rated=args.min_rated, min_liked=args.min_liked,
                       min_matched=args.min_matched)
     except KeyboardInterrupt:
         print("\nStopped. Progress is saved; run the same command to continue.")
         return
-    print(f"\nDone: {have} users saved in {OUT_DIR}.")
+    print(f"\nDone: {have} users saved in {out_dir}.")
     if have < args.target:
         print("Not enough qualified yet. Run again with a higher --pages, or lower --min-liked.")
-    report()
+    report(out_dir)
 
 
 if __name__ == "__main__":

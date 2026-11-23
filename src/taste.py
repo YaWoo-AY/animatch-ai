@@ -150,6 +150,17 @@ def build_taste(matched, embeddings, episodes_by_id=None, unrated_share=0.35, al
                  sorted(neg, key=lambda o: o.weight), scale)
 
 
+def liked_vectors(model):
+    """(vectors, weights) of the liked franchises, with the unrated cap already applied.
+
+    Used by scorers that compare a candidate with each liked franchise separately instead of with
+    their average.
+    """
+    V = np.vstack([o.vector for o in model.positives])
+    w = np.array([o.weight * (1.0 if o.rated else model.unrated_scale) for o in model.positives])
+    return V, w
+
+
 def explain(taste, rec_vector, n=3):
     """The liked franchises closest to a recommendation: [(title, similarity), ...].
 

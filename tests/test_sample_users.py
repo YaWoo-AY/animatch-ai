@@ -145,3 +145,10 @@ def test_report_prints_a_table(tmp_path, capsys):
     su.report(tmp_path)
     out = capsys.readouterr().out
     assert "u001" in out and "median rated: 70" in out
+
+
+def test_people_from_another_set_are_never_sampled(tmp_path):
+    cands = [{"id": 1, "name": "a"}, {"id": 2, "name": "b"}, {"id": 3, "name": "c"}]
+    calls = []
+    run(tmp_path, cands, lambda n: calls.append(n) or rich_list(), target=5, skip_ids={1, 3})
+    assert calls == ["b"]
