@@ -3,6 +3,26 @@
 A running log of what I tried, what surprised me, and what I changed.
 Newest entries go at the top. This becomes the "What failed and what I'd change" section of the README.
 
+## 2026-11-24 (Step 7, test run): result of the pre-registered configuration
+
+**What I did**
+- Committed the choice and the success rule, then ran the chosen configuration once on the 25 test users against popularity and the genre/tag score, in three views.
+
+**Result:** partial by the rule I set. Clearly better than popularity with the top 1000 removed (10.1% vs 0.2%, difference +9.8 pts, interval +3.0 to +19.9). With the top 300 removed, 7.7% vs 3.7%, difference +4.0 pts but the interval (-0.3 to +8.5) includes zero. On all franchises it scored 13.3% vs 15.2% for popularity, not clearly different (-1.9 pts, interval -9.1 to +5.2). Full table in DECISIONS.
+
+**What I think it means (interpretation, not tested)**
+- Taste signal exists beyond popularity: the first tail view shows it, and the top-300 estimate points the same way. It is not yet strong enough to claim, and the first tail view rests on 217 hidden franchises, many from a few users.
+- Dev and test agreed in direction in both tail views, but the sizes differ (7.5% vs 10.1% at top 1000), which is the expected spread with this much data.
+- The all-franchises result is better than I expected (I expected popularity to stay clearly ahead), but the interval is wide enough to include a 9-point deficit.
+
+**Caveats**
+- 22 users contribute to the top-1000 view (3 skipped for having no liked titles outside the head), and some of them contribute one hidden franchise.
+- Same proxy limits as before: hiding a title the user already watched is not the same as recommending something new they would enjoy.
+- The test set is spent for this question.
+
+**Next**
+- Move this configuration into `taste.py` and `recommend.py`, check it on my own list, and keep the popularity weight as a visible setting. Whether the product should show one blended list or separate "popular picks" and "deeper cuts" is still open.
+
 ## 2026-11-24 (Step 7): sampling users and a leave-one-out evaluation
 
 **What I did**

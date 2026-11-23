@@ -152,6 +152,23 @@ Used to exclude a whole franchise once the user has watched part of it (no recom
   - The all-franchises view is reported whatever it shows. I expect popularity to stay ahead there.
 - **Test commands (run once each):** `--users-dir data/test_users` with `--tail 1000`, `--tail 300` and no tail, and the methods `popularity genre minilm minilm@center=1@knn=10@genre=1@pop=0.5`.
 
+### Test-set result (run once, 2026-11-24)
+
+Configuration `minilm@center=1@knn=10@genre=1@pop=0.5`, 25 test users, Recall@10, paired difference to popularity:
+
+| View | Popularity | Chosen config | Difference [95% CI] | Verdict |
+|---|---|---|---|---|
+| Top 1000 removed (217 hidden, 22 users) | 0.2% | 10.1% | +9.8 pts [+3.0, +19.9] | clearly better |
+| Top 300 removed (370 hidden, 24 users) | 3.7% | 7.7% | +4.0 pts [-0.3, +8.5] | not clearly different |
+| All franchises (487 hidden, 25 users) | 15.2% | 13.3% | -1.9 pts [-9.1, +5.2] | not clearly different |
+
+By the rule written beforehand, this is **partial**: clearly better in one tail view, not in the other. I do not describe the configuration as an improvement over popularity in general. The point estimate is positive in both tail views and the top-300 interval only just includes zero, but I do not round that up. The genre/tag score alone was clearly better than popularity with the top 1000 removed (+6.3 pts), not clearly different with the top 300 removed, and clearly worse on all franchises (-8.9 pts).
+
+What I take from it:
+- The configuration finds less popular titles better than popularity does, and on this sample it is not clearly worse than popularity overall. It is not shown to be better where most real watching happens.
+- Recall@50 and MRR point the same way as Recall@10 in the tail views, but I did not pre-register them and do not rely on them.
+- The test set is now spent for this question. Any further tuning needs a new sample of users.
+
 ## Open decisions
 
 - **Embedding choices:** MiniLM vs BGE and the index variants (title, spoilers) were compared on the dev set but could not be separated from noise while the base method was near random. Re-run on the chosen configuration once it is in the live recommender.
