@@ -1,27 +1,16 @@
 """Collect an anonymous evaluation set of public AniList watchlists.
 
-Run from the project root, in the (.venv) terminal:
-    python src/sample_users.py --probe                       # 1. check the two AniList queries work
-    python src/sample_users.py --target 25 --exclude yawoo   # 2. sample until 25 users qualify
-    python src/sample_users.py --report                      # 3. summarize what was collected
-    # a second, untouched set for the final test (nobody from the first set is sampled again):
+Run from the project root:
+    python src/sample_users.py --probe                       # check the two AniList queries work
+    python src/sample_users.py --target 25 --exclude yawoo   # sample until 25 users qualify
+    python src/sample_users.py --report                      # summarize what was collected
     python src/sample_users.py --target 25 --out data/test_users --skip-from data/eval_users --exclude yawoo
 
-What it does: reads the recent-activity feed (people who updated their anime list lately), picks
-candidates at random, downloads each candidate's public list, and keeps the user only if the list is
-rich enough for a leave-one-out test: enough rated titles and enough titles rated 8 or higher, so
-that hiding one still leaves plenty to learn from.
-
-Privacy and terms (please read):
-  * AniList's terms prohibit "hoarding or mass collection of data". This script is for ~25-30 users,
-    runs slowly (AniList has been limiting to 30 requests/minute) and stops at --target.
-  * Only title ids, status, score and progress are stored. No usernames and no profile text. Files
-    are numbered u001, u002 and so on. The folder is under data/, which is git-ignored: never commit
-    it, and do not republish the lists.
-  * The set is a frozen snapshot, so results stay reproducible.
-  * It never writes usernames to the profile cache either (it calls the fetcher directly).
-The only identifying thing kept is AniList's numeric user id, in data/eval_users/_checked.json, so a
-re-run does not download the same people twice.
+Reads the recent-activity feed, picks candidates at random and keeps a user only if the list is
+rich enough for a leave-one-out test. AniList's terms prohibit mass collection, so this is for
+about 25 users and runs slowly. Only title ids, status, score and progress are stored, in numbered
+files under data/ (git-ignored: never commit or republish them). The AniList numeric user id is
+kept in _checked.json so a re-run does not download the same people twice.
 """
 import argparse
 import json

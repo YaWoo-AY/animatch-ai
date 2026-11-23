@@ -1,54 +1,14 @@
-"""Day 7: leave-one-out evaluation of the recommenders against baselines.
+"""Leave-one-out evaluation of the recommenders against baselines.
 
-Run from the project root, in the (.venv) terminal:
-    python src/evaluate.py --methods random popularity genre minilm bge
-    python src/evaluate.py --methods minilm minilm@alpha=0 minilm@share=0 minilm@share=1
-    python src/evaluate.py --methods minilm minilm/notitle minilm/spoilers bge bge/notitle
+Run from the project root:
+    python src/evaluate.py --methods popularity genre minilm
+    python src/evaluate.py --users-dir data/test_users --tail 1000 --methods popularity minilm@center=1@knn=10
 
-The test, for each of the 25 saved users (data/eval_users, made by sample_users.py):
-  1. pick up to --per-user franchises the user rated 8 or higher (a fixed random choice);
-  2. for each one, hide the WHOLE franchise from their list (so no sibling season gives it away);
-  3. build the recommendation from everything else, hide every franchise they have seen;
-  4. record where the hidden franchise ranks among all remaining franchises in the index.
-Recall@10 is the share of hidden franchises that land in the top 10. Averages are taken PER USER
-first and then across users, so one person with 1,000 liked titles cannot outvote the others, and the
-confidence interval comes from resampling users, not trials.
-
-Methods
-  random                  shuffled franchises (the floor)
-  popularity              most popular franchises first (the baseline to beat)
-  genre                   the same taste-vector pipeline, but titles are represented by their genres and
-                          tags (IDF-weighted) instead of text embeddings: "do embeddings beat plain tags?"
-  minilm, bge             taste vector over stored text embeddings (variant 'base')
-  minilm/notitle ...      another index variant (run build_index.py --variant first)
-  <method>@alpha=0.0      options after @ (combine freely, e.g. minilm@center=1@knn=5@pop=1):
-  <method>@share=0.35       alpha  weight of the dislike vector (centroid scoring only)
-                            share  largest share of the liked weight that unrated titles may carry;
-                                   0 ignores unrated titles, 1 removes the cap
-                            center 1 = subtract the average vector of the whole index first. Text embeddings
-                                   share a big "typical anime" component; removing it makes cosine compare
-                                   what is distinctive about a title
-                            knn    K > 0 = score a title by its similarity to its K nearest LIKED franchises
-                                   (weighted) instead of to the average of all of them, so a user with
-                                   several different tastes is not blurred into one
-                            pop    w > 0 = add w times the standardised log popularity to the standardised
-                                   similarity (a popularity prior; popularity alone is a strong baseline)
-                            genre  w > 0 = also score with the genre/tag representation (same knn setting)
-                                   and add w times its standardised score (tags and text embeddings seem
-                                   to carry different information)
-
---tail N (a second view, always reported next to the main one): the N most popular franchises are
-removed from the candidate pool for EVERY method, and hidden franchises among them are skipped. The
-main test rewards "recommend what everyone watches", because the hidden item is something the user
-chose to watch and people mostly choose popular things. The tail view asks the question the product
-cares about: can the system find the less obvious titles? Popularity still competes, but only among
-the remaining franchises.
-
-Honest limits of this test: it measures "can the system find things you already watched and loved",
-which favours popular titles and says nothing about whether a new recommendation would be enjoyed.
-It is a proxy for comparing versions of the system, not a promise about real recommendations.
-Dense methods use exact cosine over the stored vectors (ChromaDB uses an approximate index, so live
-results can differ slightly).
+For each saved user, hide a whole franchise they rated 8 or higher, build the recommendation from
+the rest, and record the rank of the hidden franchise among the unseen ones. Averages are per user,
+intervals come from resampling users. Dense methods use exact cosine over the stored vectors.
+Method options (@alpha, @share, @center, @knn, @pop, @genre) and the protocol are described in
+DECISIONS.md.
 """
 import argparse
 import json

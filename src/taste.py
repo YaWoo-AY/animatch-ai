@@ -1,32 +1,10 @@
-"""Day 6: turn a watchlist into (a) a set of franchises to hide and (b) a taste vector.
+"""Turn a watchlist into (a) a set of franchises to hide and (b) a taste vector.
 
-No network and no ChromaDB in this file, only numpy, so every rule here is easy to test.
-
-The idea
---------
-1. Exclusion set: any franchise the user has watched, is watching, paused or dropped is never
-   recommended (we do not suggest season 2 of something they already know). Plan-to-watch titles
-   are NOT hidden by default, because they are candidates the user already showed interest in.
-2. Weights: every list entry gets a number. Positive means "more like this", negative means
-   "less like this", zero means "no opinion".
-       rated 8-10            +0.6 .. +1.0   (score - 5) / 5
-       rated 6-7.9           0              lukewarm, ignored
-       rated 5 or lower      -0.25 .. -1.0
-       completed, unrated    +0.3           they finished it, which says something
-       watching, unrated     +0.15
-       dropped, unrated      -0.6, or -0.25 if they got past half of the episodes
-       paused, planning      0
-   A score always beats the status: a dropped title they rated 9 counts as a 9.
-3. One vote per franchise: a five-season show is one observation, not five. The franchise weight
-   is the mean of its entries' weights (ignoring zeros) and its vector is the mean of their vectors.
-4. Unrated titles cannot drown out rated ones. Some people rate 20% of their list; without a cap,
-   600 "completed" titles at +0.3 would outweigh 120 deliberate high ratings and the taste vector
-   would just be the average of everything they watched. The unrated share of the positive mass is
-   capped (default 35%) whenever the user has any rated positives.
-5. Rocchio-style vector: unit(positive centroid) - alpha * unit(negative centroid), normalised.
-   alpha is a guess (0.3) to be tuned with the evaluation harness in week 3.
-
-All the numbers above are starting points, not findings.
+No network and no ChromaDB here, only numpy, so every rule is easy to test. The rules and the
+reasons for them are in DECISIONS.md (Taste vector and exclusion). In short: seen franchises are
+hidden, each entry gets a weight from its score or status, a franchise gets one vote, unrated
+titles are capped, and the vector is positive centroid minus alpha times negative centroid.
+All numbers are starting points, not findings.
 """
 from dataclasses import dataclass, field
 

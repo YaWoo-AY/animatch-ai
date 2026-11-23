@@ -1,7 +1,6 @@
 """Fetch anime metadata from the AniList GraphQL API and save it to disk.
 
-Day 2: fetch one page and clean it.
-Day 3: crawl many pages with checkpointing, so a crash or rate limit never loses work.
+Fetches pages of titles, cleans them, and crawls with checkpointing, so a crash or rate limit never loses work.
 
 Run from the project root:
     python src/fetch_anilist.py --pages 3     # small test crawl (150 titles)

@@ -1,4 +1,4 @@
-"""Day 6: recommendations from a real watchlist (first end-to-end version, no reranking yet).
+"""Recommendations from a real watchlist (first end-to-end version, no reranking yet).
 
 Run from the project root, in the terminal whose prompt starts with (.venv):
     python src/recommend.py anilist <username>

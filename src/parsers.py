@@ -1,4 +1,4 @@
-"""Day 5: read a user's public anime list from AniList or MyAnimeList (official API).
+"""Read a user's public anime list from AniList or MyAnimeList (official API).
 
 Every platform is turned into the same entry format:
     {"anilist_id": int | None, "mal_id": int | None, "status": str, "score": float | None, "progress": int}
