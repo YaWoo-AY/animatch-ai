@@ -3,7 +3,53 @@
 A running log of what I tried, what surprised me, and what I changed.
 Newest entries go at the top. This becomes the "What failed and what I'd change" section of the README.
 
-## 2026-11-22 (Day 5): reading watchlists from AniList and MyAnimeList
+## 2026-11-24 (Step 7): sampling users and a leave-one-out evaluation
+
+**What I did**
+- Wrote `src/sample_users.py`: reads AniList's recent-activity feed, picks candidates at random, downloads each public list and keeps the user only if it has at least 100 titles in the index, 50 rated and 15 rated 8 or higher. It stores ids, statuses and scores only, as `u001.json` and so on, never usernames. AniList's terms forbid mass collection and the API was limiting to 30 requests a minute, so it runs slowly and stops at 25. Both queries worked first time under `--probe`.
+- Sampled two sets of 25: a dev set (`data/eval_users`) to compare methods on, and a test set (`data/test_users`) that nobody touches until one configuration has been chosen. The test set skips everyone in the dev set.
+- Wrote `src/evaluate.py`. For each user it hides franchises they rated 8 or higher (`--per-user` sets how many) (whole franchise, so no sibling season leaks it), builds the recommendation from the rest, hides everything else they have seen, and records the rank of the hidden franchise among all remaining franchises. Recall@10 is averaged per user, then across users; intervals come from resampling users. Baselines: random, popularity, and a genre/tag vector run through the same pipeline.
+- Added options to compare ideas without code changes: `@center` (subtract the average vector), `@knn` (score by the nearest liked franchises), `@pop` (popularity prior), `@genre` (fuse tags with embeddings), plus `--tail N` (drop the N most popular franchises from the candidates).
+
+**Results on the dev set (Recall@10)** (exact figures for every method are in `results/*.json`; I am quoting only the ones I have checked)
+- All franchises: popularity 19.7%. Nothing I tried beat it on this view.
+- Uncentered embedding cosine was about as good as random, and worse than random once the popular titles were removed. Centering the vectors helped.
+- Removing the 300 most popular franchises: the genre/tag vector beat the text embeddings.
+- Removing the 1000 most popular: centered nearest-liked scoring beat popularity, but the result swung with K (8.1%, 2.0%, 4.6% for three values of K), and the K that did best here scored only 3.2% with the top 300 removed.
+- Fusing tags with embeddings and adding a popularity prior of 0.5 (`minilm@center=1@knn=10@genre=1@pop=0.5`) gave 7.5% (95% interval 2.1 to 17.2) with the top 1000 removed, +6.3 points over popularity, and 7.3% with the top 300 removed, +2.7 points (interval +0.6 to +5.0).
+
+**What surprised me**
+- Popularity alone puts about 1 in 5 hidden favorites in the top 10. The hidden item is something the user chose to watch, and people mostly watch popular things, so the main view rewards recommending what everyone watches.
+- Cosine to the average vector without centering was worse than random once the popular titles were removed. My reading (not tested directly): it favors "typical" titles, and the typical ones are the popular ones.
+- Results moved a lot with K (8.1%, 2.0%, 4.6%), which is noise, not a trend. The winner among about a dozen settings on 25 users is partly luck.
+
+**What failed or went wrong**
+- My first taste vector scored far below popularity (19.7%). I had spent a day judging recommendations by eye on one profile (mine); the harness is what showed it.
+- Two of my own tests were wrong (a popularity formula that was backwards, and a tie-breaking assumption). The code was right both times.
+
+**Caveats**
+- 25 users from an activity feed favor people who update often. The test is a proxy: finding things a user already watched and loved is not the same as recommending something new they would enjoy.
+- The 1000 view has only 254 hidden franchises, and some users contribute only 1 to 3.
+
+**Next**
+- Run the chosen configuration once on the test set (see DECISIONS), then move it into `taste.py` and `recommend.py`.
+
+## 2026-11-23 (Step 6): exclusion set and taste vector
+
+**What I did**
+- `src/taste.py`: hides every franchise the user has completed, is watching, paused or dropped (plan-to-watch titles stay eligible and are tagged). Each list entry gets a weight: ratings of 8 to 10 are positive, 6 to 7.9 ignored, 5 or lower negative; with no score, completed is a weak positive, dropped early is a negative and dropped past half the episodes a weaker one. A franchise counts once, however many seasons. Unrated titles may carry at most 35% of the liked weight. The vector is the liked centroid minus 0.3 times the disliked centroid.
+- `src/recommend.py`: fetches a watchlist, builds the vector from vectors already stored in ChromaDB (no model needed), queries with the filters, drops seen franchises and prints each result with the liked franchises closest to it.
+
+**What I saw on my own list**
+- No seen franchise appeared in the results, and the MiniLM and BGE lists differed.
+- It recommended later seasons and OVAs, because retrieval returns whichever title of a franchise is closest to the vector. Fixed by showing each franchise's first entry (TV before movie before ONA before OVA, then earliest year), skipped when that entry breaks the user's filters.
+- Low-rated titles can appear because similarity has no quality signal; `--min-score` is a filter for that, not a fix.
+- Setting the dislike weight to zero (`--alpha 0`) changed only some of the results.
+
+**Lesson**
+- Judging one profile by eye cannot choose between these explanations. That is why Step 7 builds an evaluation.
+
+## 2026-11-22 (Step 5): reading watchlists from AniList and MyAnimeList
 
 **What I did**
 - Wrote `src/parsers.py`. Both platforms become the same entry: `{anilist_id, mal_id, status, score, progress}`, with statuses completed, watching, paused, dropped, planning.
@@ -31,7 +77,7 @@ Newest entries go at the top. This becomes the "What failed and what I'd change"
 - Whether shorts and specials should count as "seen" for the exclusion set (see DECISIONS).
 - Collect 20-30 public usernames for the evaluation.
 
-## 2026-11-22 (Day 4): embeddings, ChromaDB and first searches
+## 2026-11-22 (Step 4): embeddings, ChromaDB and first searches
 
 **What I did**
 - Installed chromadb and sentence-transformers. Embedded all 4,869 titles with two models, MiniLM (all-MiniLM-L6-v2) and BGE-small (bge-small-en-v1.5), one ChromaDB collection per model, cosine distance. Build time on CPU: MiniLM about 72-79s, BGE about 176-184s.
@@ -71,7 +117,7 @@ Newest entries go at the top. This becomes the "What failed and what I'd change"
 - Franchise duplicates sit next to each other in results (Restaurant to Another World 1 and 2, Wagnaria!!2 and !!3, three Mushi-Shi entries). That is what the diversity pass is for.
 
 **What I changed**
-- Tag stoplist for the embedding text only ("Primarily Teen Cast", "Male Protagonist", "Ensemble Cast", "Heterosexual" and similar). Resolves the Day 2 open question. Tags in `anime.json` are untouched.
+- Tag stoplist for the embedding text only ("Primarily Teen Cast", "Male Protagonist", "Ensemble Cast", "Heterosexual" and similar). Resolves the Step 2 open question. Tags in `anime.json` are untouched.
 - `spoiler_tags` field (spoiler-flagged tags ranked 60 or higher), re-cleaned from the saved raw file with no recrawl. Used only in the `spoilers` variants.
 - Embedding variants with a `--variant` option in `build_index.py`, `search.py` and `inspect_title.py`.
 - Embedding text puts title, genres and themes first and the synopsis last, so truncation cuts the synopsis tail, not the genres.
@@ -81,10 +127,10 @@ Newest entries go at the top. This becomes the "What failed and what I'd change"
 - Spoiler tags in or out, and a minimum tag rank for them (60 vs 80), or use tag rank as a weight in BM25 or reranking.
 - MiniLM vs BGE on Recall@10. BGE looks better by eye on mood queries.
 - BM25 over tags and titles, a cross-encoder reranker, and LLM query rewriting ("relives the same day" to "time loop") as a stretch.
-- Do any Monogatari TV seasons end up alone (Day 3 check, still pending)?
+- Do any Monogatari TV seasons end up alone (Step 3 check, still pending)?
 - Commit the Chroma index to the repo or rebuild at startup?
 
-## 2026-11-21 (Day 3): full crawl and franchise grouping
+## 2026-11-21 (Step 3): full crawl and franchise grouping
 
 **What I did**
 - Crawled the top 5,000 titles by popularity (TV, MOVIE, ONA, OVA; adult titles excluded). The crawl is resumable and saves each page as it arrives.
@@ -109,7 +155,7 @@ Newest entries go at the top. This becomes the "What failed and what I'd change"
 **Open questions**
 - Do any Monogatari TV seasons end up alone? (Known cost of the final rule: a TV season linked only by PARENT/SIDE_STORY is not merged.)
 
-## 2026-11-20 (Day 2): first AniList fetch
+## 2026-11-20 (Step 2): first AniList fetch
 
 **What I did**
 - Fetched the top 50 anime by popularity from AniList and saved raw and cleaned JSON.

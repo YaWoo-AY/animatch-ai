@@ -104,7 +104,7 @@ Used to exclude a whole franchise once the user has watched part of it (no recom
 **Null score or year.**
 - After the status filter, remaining null scores should be rare. Handle them at ranking time (treat as no score signal, do not rank them as zero).
 
-## Profile import (Day 5)
+## Profile import (Step 5)
 
 **AniList is the primary source, the official MyAnimeList API is the second.**
 - Why AniList first: GraphQL, no key needed, one query returns the whole list including custom lists, and the crawl already uses AniList ids.
@@ -121,7 +121,7 @@ Used to exclude a whole franchise once the user has watched part of it (no recom
 - `{anilist_id, mal_id, status, score, progress}`; adding a platform means one new function and one line in `FETCHERS`.
 
 **Scores: 0 means unrated, stored as None.**
-- 79% of my own entries are unrated, so unrated completed titles must still count, as a weaker positive signal than a high rating. Designed in Day 6.
+- 79% of my own entries are unrated, so unrated completed titles must still count, as a weaker positive signal than a high rating. Designed in Step 6.
 
 **Cache profiles for 24 hours.**
 - Protects the rate limits and makes reruns instant. `--refresh` forces a fetch. The cache is in `data/cache/`, which is git-ignored.
@@ -130,13 +130,33 @@ Used to exclude a whole franchise once the user has watched part of it (no recom
 - They cannot be recommended and cannot block their franchise from being suggested. Measured on a real list: 8% of entries, but 62% of those are shorts and specials excluded on purpose, so the real gap is about 2%.
 - Not widening the crawl for now. Revisit if the evaluation shows missing history hurting Recall@10.
 
+## Taste vector and exclusion (Step 6)
+
+- **Seen means whole franchises.** Completed, watching, paused and dropped hide the franchise. Plan-to-watch does not, because it is a candidate the user already likes the look of.
+- **Unrated titles count, weakly, with a cap.** Many people rate a fifth of their list. Without a cap, hundreds of unrated completed titles would outvote a few dozen deliberate high ratings. Share capped at 35%; this is a starting value, to be tuned.
+- **One vote per franchise.** Five seasons are one observation.
+- **Recommend the franchise's first entry,** not the season nearest the taste vector, unless that entry breaks the user's filters.
+- **Shorts and specials are ignored for seen history.** They are not indexed, so they cannot mark a franchise as seen. Earlier measurement: most unmatched titles were specials or shorts that are excluded by design. Revisit if the evaluation or real users show repeated recommendations of things already watched.
+
+## Evaluation protocol (Step 7)
+
+- **Leave-one-out on whole franchises.** Hide a franchise rated 8 or higher, build from the rest, rank the hidden franchise among all unseen franchises. Averaged per user, with intervals from resampling users, so a user with 1,000 liked titles cannot dominate.
+- **Two views, both reported.** All franchises, and with the 300 or 1,000 most popular removed. The first rewards recommending what everyone watches (popularity alone gets 19.7%); the second asks whether the system finds less obvious titles. I decided to report both before seeing the second.
+- **Dev set and test set.** 25 users to compare methods on, 25 different users reserved for one final run. Tuning on the test set is not allowed. If I change the configuration after looking at the test results, the test set is spent and a new one must be sampled.
+- **Users are anonymous and local.** Ids, statuses and scores only, in the git-ignored `data/`. AniList's terms forbid mass collection, so the sets stay small.
+- **Chosen after the dev runs, before the test run:** `minilm@center=1@knn=10@genre=1@pop=0.5` (centered MiniLM vectors, scored against the 10 nearest liked franchises, fused with the genre/tag score at equal weight, plus a 0.5 popularity prior). Reason: it is the only configuration that was clearly better than popularity at Recall@10 in both tail views (+6.3 points with the top 1000 removed, +2.7 with the top 300 removed), with similar absolute values (7.5% and 7.3%). Settings that did better in one view (K=5 at 8.1%) did worse in the other and moved a lot with K, which looks like noise. Picking the best of a dozen settings on 25 users also overstates its real strength.
+- **Decision rule, written before the test run:**
+  - Success: the paired difference to popularity at Recall@10 has a lower bound above zero in both tail views on the test set.
+  - Partial: clearly better in one tail view only.
+  - Failure: neither. Then the README says so and the configuration is not described as an improvement.
+  - The all-franchises view is reported whatever it shows. I expect popularity to stay ahead there.
+- **Test commands (run once each):** `--users-dir data/test_users` with `--tail 1000`, `--tail 300` and no tail, and the methods `popularity genre minilm minilm@center=1@knn=10@genre=1@pop=0.5`.
+
 ## Open decisions
 
-- **Embedding choices (week 3, by Recall@10):** MiniLM vs BGE; title in text or not; spoiler tags in or out; minimum rank for spoiler tags (60 vs 80) or tag rank as a ranking weight.
+- **Embedding choices:** MiniLM vs BGE and the index variants (title, spoilers) were compared on the dev set but could not be separated from noise while the base method was near random. Re-run on the chosen configuration once it is in the live recommender.
 - **Hybrid retrieval:** BM25 over titles and tags, cross-encoder reranker, diversity pass.
 - **Query rewriting by an LLM:** stretch goal.
 - **Chroma index:** commit it to the repo or rebuild at startup? Depends on repo size and cold-start time on the demo host. Decide in week 1 of deployment planning.
-- **Hidden gems mode:** how strongly to down-weight popularity.
-- **Evaluation users:** collect 20-30 public watchlists starting in week 2; anonymize usernames in the repo.
-- **Shorts and specials in seen history:** TV_SHORT and SPECIAL titles are not indexed, so having watched one does not mark its franchise as seen. Options: ignore, or index them only for exclusion and never recommend them. Decide with the exclusion set (Day 6).
+- **Hidden gems and popularity:** the popularity prior is 0.5 in the chosen configuration. Whether the product shows one list or two (popular picks you have not seen, and deeper cuts for your taste) depends on the test-set results.
 - **Private lists:** confirm the error replies from AniList and MAL, then make the demo message friendlier.
