@@ -182,6 +182,13 @@ What I take from it:
 - **Known gaps, left as they are:** `OTHER` links are never followed (Cyberpunk: Edgerunners 2 is linked to the first series only as `OTHER`, so it can be recommended to someone who loved the first; arguably useful). A TV side story attached by `PARENT` stays a separate franchise (Horimiya: The Missing Pieces), as decided when grouping was written.
 - **Filters apply to the franchise's first entry,** the title that is shown, not to whichever title matched best.
 
+## Demo page
+
+- **A thin Streamlit page (`app.py`) over `recommend.recommend`.** It holds no recommendation logic, so what the page shows is what the command line and the evaluation use.
+- **Both list styles are exposed so they can be compared by eye before one is chosen:** a popularity-weight slider, and a "deeper cuts" toggle that shows a second list with the most popular franchises left out, side by side.
+- **Spoiler-free:** the page shows title, year, format, episode count, community score, cover and the titles that explain the pick. No synopsis.
+- **Privacy:** the watchlist is cached briefly (an hour in memory, 24 hours on disk by the parser) and nothing is logged. A hosted version would need this stated on the page and a decision on whether the disk cache is kept.
+
 ## Open decisions
 
 - **Embedding choices:** MiniLM vs BGE and the index variants (title, spoilers) were compared on the dev set but could not be separated from noise while the base method was near random. Re-run on the chosen configuration once it is in the live recommender.
