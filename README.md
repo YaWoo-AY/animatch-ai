@@ -5,6 +5,7 @@ suggests shows you have not seen, with the titles you liked that led to each pic
 
 **Live demo:** [https://animatch-ai.streamlit.app/]
 
+![The page with the main list and a "deeper cuts" list side by side](docs/mainpage.png)
 
 I built it to learn how to evaluate a recommender honestly, not only to make one. The main result
 is mixed, and this page says so.
