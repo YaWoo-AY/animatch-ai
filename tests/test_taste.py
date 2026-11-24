@@ -4,7 +4,9 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+import evaluate as ev
 import recommend
+import scoring
 import taste
 from taste import build_taste, entry_weight, explain, planned_franchises, seen_franchises
 
@@ -127,88 +129,127 @@ def test_explain_prefers_rated_franchises_close_to_the_recommendation():
     assert names == ["Near", "Mid"]
 
 
-# ---- retrieval with a fake ChromaDB collection ----
+# ---- recommending over a small catalog ----
 
-class FakeCollection:
-    """Brute-force stand-in for a Chroma collection (cosine distance, no real database)."""
-
-    def __init__(self, items):
-        self.items = items   # list of (anilist_id, franchise_id, vector, extra_metadata)
-        self.queries = []
-
-    def count(self):
-        return len(self.items)
-
-    def get(self, ids, include):
-        found = [it for it in self.items if str(it[0]) in ids]
-        return {"ids": [str(it[0]) for it in found], "embeddings": [it[2] for it in found]}
-
-    def query(self, query_embeddings, n_results, where=None, include=None):
-        self.queries.append({"n": n_results, "where": where})
-        q = unit(*query_embeddings[0])
-        rows = sorted(self.items, key=lambda it: -float(unit(*it[2]) @ q))[:n_results]
-        return {"ids": [[str(it[0]) for it in rows]],
-                "distances": [[1 - float(unit(*it[2]) @ q) for it in rows]],
-                "embeddings": [[it[2] for it in rows]],
-                "metadatas": [[{"anilist_id": it[0], "franchise_id": it[1], "title": f"T{it[0]}",
-                                "episodes": 12, "score": 80, "year": 2020, "format": "TV", **it[3]}
-                               for it in rows]]}
+def rec_row(aid, fid, fmt="TV", year=2010, pop=100, eps=12, score=70, genres=("Action",)):
+    return {"anilist_id": aid, "mal_id": None, "title": f"T{aid}", "franchise_id": fid, "format": fmt,
+            "episodes": eps, "year": year, "score": score, "popularity": pop, "genres": list(genres),
+            "tags": [], "cover": None}
 
 
-def test_retrieve_skips_hidden_franchises_and_keeps_one_per_franchise():
-    items = [(1, 10, [1, 0], {}), (2, 10, [0.99, 0.1], {}),    # franchise 10, hidden
-             (3, 20, [0.95, 0.3], {}), (4, 20, [0.94, 0.3], {}),  # franchise 20: only the best shows
-             (5, 30, [0.5, 0.9], {})]
-    col = FakeCollection(items)
-    got = recommend.retrieve(col, [1, 0], hidden_franchises={10}, k=5)
-    assert [r["anilist_id"] for r in got] == [3, 5]
+PLAIN = "minilm@center=0@knn=0"      # taste vector only: no centering, no nearest-liked, no popularity
 
 
-def test_retrieve_asks_for_more_when_the_first_batch_is_all_hidden():
-    items = [(i, i, [1, i * 0.01], {}) for i in range(1, 201)]
-    col = FakeCollection(items)
-    hidden = set(range(1, 151))                      # the 150 closest are all seen
-    got = recommend.retrieve(col, [1, 0], hidden, k=5, start=20)
-    assert [r["anilist_id"] for r in got] == [151, 152, 153, 154, 155]
-    assert len(col.queries) > 1 and col.queries[-1]["n"] > 150
+def small_world():
+    """Six franchises on two axes: 'liked' direction (1,0) and 'disliked' direction (0,1)."""
+    rows = [rec_row(1, 1, pop=50), rec_row(2, 2, pop=60),
+            rec_row(3, 3, year=2012, pop=100),                    # close to the liked title
+            rec_row(30, 3, "OVA", year=2015, pop=10),             # same franchise, even closer
+            rec_row(4, 4, pop=500),                               # close to the disliked title
+            rec_row(5, 5, pop=300),                               # plan-to-watch, close to the liked one
+            rec_row(6, 6, pop=200)]
+    vecs = {1: [1, 0], 2: [0, 1], 3: [0.9, 0.1], 30: [0.95, 0.05], 4: [0.1, 0.9], 5: [0.8, 0.2], 6: [0.7, 0.3]}
+    catalog = scoring.Catalog(rows)
+    M = np.array([vecs[r["anilist_id"]] for r in catalog.records], dtype=float)
+    G = ev.genre_matrix(catalog.records)
+
+    def matrices(name, variant):
+        return G if name == "genre" else M
+    return catalog, matrices
 
 
-def test_retrieve_stops_when_the_collection_is_exhausted():
-    items = [(1, 1, [1, 0], {}), (2, 2, [0, 1], {})]
-    got = recommend.retrieve(FakeCollection(items), [1, 0], hidden_franchises={1, 2}, k=3)
-    assert got == []
+def world_matched():
+    return [entry(1, 1, score=10, title="Liked"), entry(2, 2, score=1, title="Disliked"),
+            entry(5, 5, "planning", title="Planned")]
 
 
-def test_recommend_end_to_end_with_fake_data():
-    items = [(1, 1, [1, 0], {}),          # liked, seen
-             (2, 2, [0, 1], {}),          # disliked, seen
-             (3, 3, [0.9, 0.1], {}),      # close to the liked title: should lead
-             (4, 4, [0.1, 0.9], {}),      # close to the disliked title: should trail
-             (5, 5, [0.8, 0.2], {})]      # plan-to-watch, close to the liked one
-    col = FakeCollection(items)
-    matched = [entry(1, 1, score=10, title="Liked"), entry(2, 2, score=1, title="Disliked"),
-               entry(5, 5, "planning", title="Planned")]
-    model, recs = recommend.recommend(matched, col, {}, k=3, where={"year": {"$gte": 2000}})
-    assert [r["anilist_id"] for r in recs] == [3, 5, 4]
+def ids(recs):
+    return [r["anilist_id"] for r in recs]
+
+
+def test_seen_franchises_are_never_recommended_and_the_closest_leads():
+    catalog, matrices = small_world()
+    model, recs = recommend.recommend(world_matched(), catalog, matrices, PLAIN, k=10)
+    assert ids(recs) == [3, 5, 6, 4]                  # liked-like first, disliked-like last, seen hidden
     assert recs[1]["planned"] is True and recs[0]["planned"] is False
     assert recs[0]["because"][0][0] == "Liked"
-    assert col.queries[0]["where"] == {"year": {"$gte": 2000}}      # filters reach the database
-    _, hidden_planned = recommend.recommend(matched, col, {}, k=3, hide_planned=True)
-    assert 5 not in [r["anilist_id"] for r in hidden_planned]
 
 
-def test_recommend_returns_nothing_when_there_is_nothing_to_learn_from():
-    col = FakeCollection([(1, 1, [1, 0], {})])
-    model, recs = recommend.recommend([entry(1, 1, "planning")], col, {})
+def test_plan_to_watch_can_be_hidden():
+    catalog, matrices = small_world()
+    _, recs = recommend.recommend(world_matched(), catalog, matrices, PLAIN, k=10, hide_planned=True)
+    assert 5 not in ids(recs)
+
+
+def test_the_franchise_start_is_shown_not_the_closest_title():
+    catalog, matrices = small_world()
+    _, recs = recommend.recommend(world_matched(), catalog, matrices, PLAIN, k=1)
+    assert recs[0]["anilist_id"] == 3 and recs[0]["format"] == "TV"    # not the OVA (30) that is closer
+
+
+def test_limits_are_checked_on_the_franchise_start():
+    catalog, matrices = small_world()
+    _, recs = recommend.recommend(world_matched(), catalog, matrices, PLAIN, k=10, limits={"min_year": 2013})
+    assert 3 not in ids(recs)                         # its first entry is from 2012
+    _, recs = recommend.recommend(world_matched(), catalog, matrices, PLAIN, k=10, limits={"max_episodes": 6})
+    assert recs == []
+
+
+def test_skip_popular_leaves_out_the_most_popular_franchises():
+    catalog, matrices = small_world()
+    _, recs = recommend.recommend(world_matched(), catalog, matrices, PLAIN, k=10, skip_popular=1)
+    assert 4 not in ids(recs)                         # franchise 4 is the most popular one
+
+
+def test_a_huge_popularity_weight_orders_the_results_by_popularity():
+    catalog, matrices = small_world()
+    _, recs = recommend.recommend(world_matched(), catalog, matrices, PLAIN + "@pop=1000", k=10)
+    assert ids(recs) == [4, 5, 6, 3]
+
+
+def test_retellings_of_seen_franchises_are_hidden_but_not_merged():
+    catalog, matrices = small_world()
+    for r in catalog.records:
+        if r["anilist_id"] == 1:
+            r["relations"] = [{"anilist_id": 6, "media_type": "ANIME", "type": "ALTERNATIVE"}]
+    links = recommend.retelling_links(catalog.records)
+    assert links[1] == {6} and links[6] == {1}                       # symmetric
+    _, shown = recommend.recommend(world_matched(), catalog, matrices, PLAIN, k=10)
+    assert 6 in ids(shown)                                           # visible without the links
+    _, recs = recommend.recommend(world_matched(), catalog, matrices, PLAIN, k=10, retellings=links)
+    assert 6 not in ids(recs) and 3 in ids(recs)
+
+
+def test_only_alternative_links_between_anime_count_as_retellings():
+    rows = [{**rec_row(1, 1), "relations": [{"anilist_id": 2, "media_type": "ANIME", "type": "OTHER"},
+                                           {"anilist_id": 3, "media_type": "MANGA", "type": "ALTERNATIVE"}]},
+            rec_row(2, 2), rec_row(3, 3)]
+    assert recommend.retelling_links(rows) == {}
+
+
+def test_nothing_positive_returns_nothing():
+    catalog, matrices = small_world()
+    model, recs = recommend.recommend([entry(5, 5, "planning")], catalog, matrices, PLAIN)
     assert model is None and recs == []
 
 
+def test_the_live_default_is_the_evaluated_configuration():
+    assert scoring.parse_method(recommend.build_spec()) == scoring.parse_method(scoring.DEFAULT_SPEC)[:2] + (
+        {**scoring.parse_method(scoring.DEFAULT_SPEC)[2], "alpha": 0.3, "share": 0.35},)
+
+
+def test_live_ranking_matches_the_scorer_the_evaluation_uses():
+    catalog, matrices = small_world()
+    spec = "minilm@center=1@knn=2@genre=1@pop=0.5"
+    matched = world_matched()
+    scores = scoring.make_scorer(spec, catalog, matrices)(matched, np.random.default_rng(0))
+    seen = seen_franchises(matched)
+    expected = [int(f) for f in catalog.franchise_ids[np.argsort(-scores, kind="stable")] if int(f) not in seen]
+    _, recs = recommend.recommend(matched, catalog, matrices, spec, k=10)
+    assert [r["franchise_id"] for r in recs] == expected
+
+
 # ---- franchise entry points ----
-
-def rec_row(aid, fid, fmt="TV", year=2010, pop=100, eps=12, score=70):
-    return {"anilist_id": aid, "mal_id": None, "title": f"T{aid}", "franchise_id": fid, "format": fmt,
-            "episodes": eps, "year": year, "score": score, "popularity": pop, "genres": [], "cover": None}
-
 
 def test_entry_point_prefers_tv_then_earliest_year():
     rows = [rec_row(1, 7, "OVA", 1999), rec_row(2, 7, "TV", 2012), rec_row(3, 7, "TV", 2010),
@@ -229,24 +270,3 @@ def test_within_limits_uses_the_stored_sentinels():
     assert not recommend.within_limits({**ok, "episodes": -1}, max_episodes=26)   # unknown length under a cap
     assert not recommend.within_limits({**ok, "year": 2014}, min_year=2015)
     assert recommend.within_limits({**ok, "episodes": -1})                         # no cap, unknown is fine
-
-
-def test_recommend_shows_the_franchise_start_but_keeps_the_matched_title():
-    items = [(1, 1, [1, 0], {}),                                  # liked and seen
-             (3, 3, [0.9, 0.1], {"title": "Season 4"})]           # franchise 3, closest title
-    col = FakeCollection(items)
-    matched = [entry(1, 1, score=10, title="Liked")]
-    start = {3: {"anilist_id": 30, "franchise_id": 3, "title": "Season 1", "episodes": 12, "year": 2012,
-                 "score": 75, "format": "TV"}}
-    _, recs = recommend.recommend(matched, col, {}, k=1, starts=start)
-    assert recs[0]["title"] == "Season 1" and recs[0]["via"] == "Season 4" and recs[0]["anilist_id"] == 30
-
-
-def test_the_franchise_start_is_skipped_when_it_breaks_the_limits():
-    items = [(1, 1, [1, 0], {}), (3, 3, [0.9, 0.1], {"title": "Season 4", "year": 2020})]
-    col = FakeCollection(items)
-    matched = [entry(1, 1, score=10, title="Liked")]
-    start = {3: {"anilist_id": 30, "franchise_id": 3, "title": "Season 1", "episodes": 12, "year": 2005,
-                 "score": 75, "format": "TV"}}
-    _, recs = recommend.recommend(matched, col, {}, k=1, starts=start, limits={"min_year": 2015})
-    assert recs[0]["title"] == "Season 4" and "via" not in recs[0]

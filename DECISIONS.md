@@ -172,6 +172,16 @@ What I take from it:
 - Recall@50 and MRR point the same way as Recall@10 in the tail views, but I did not pre-register them and do not rely on them.
 - The test set is now spent for this question. Any further tuning needs a new sample of users.
 
+## Live recommender
+
+- **One scoring code path.** `scoring.py` holds the method parser, the scorer and the catalog arrays. `evaluate.py` and `recommend.py` both import it, so what was measured is what runs. A test checks that the live ranking equals the scorer's ranking.
+- **Default: `minilm@center=1@knn=10@genre=1@pop=0.5`,** the configuration chosen before the test run. The popularity weight is a flag (`--pop`), because the right amount depends on what the user wants from the list.
+- **Deeper cuts:** `--skip-popular N` removes the N most popular franchises, the same view the evaluation used in its tail runs. Whether the app shows one list or two ("popular picks" and "deeper cuts") is still open.
+- **Retrieval no longer goes through ChromaDB queries.** Scoring needs every franchise (the tag score and the nearest-liked score are computed over all of them), so vectors are read from ChromaDB once and scored with numpy. At about 3,000 franchises this is fast; it would need revisiting for a catalog many times larger.
+- **Retellings are hidden, not merged.** AniList's `ALTERNATIVE` links (Horimiya and the 2012 Hori-san to Miyamura-kun OVA) hide a franchise when its counterpart has been seen, so you are not sent to another telling of a story you know. They are never used to merge franchises, because `ALTERNATIVE` also covers loosely related versions, and the cost of over-hiding falls on titles that might be new. `--keep-retellings` switches it off. This rule is not in the evaluation, which was run without it.
+- **Known gaps, left as they are:** `OTHER` links are never followed (Cyberpunk: Edgerunners 2 is linked to the first series only as `OTHER`, so it can be recommended to someone who loved the first; arguably useful). A TV side story attached by `PARENT` stays a separate franchise (Horimiya: The Missing Pieces), as decided when grouping was written.
+- **Filters apply to the franchise's first entry,** the title that is shown, not to whichever title matched best.
+
 ## Open decisions
 
 - **Embedding choices:** MiniLM vs BGE and the index variants (title, spoilers) were compared on the dev set but could not be separated from noise while the base method was near random. Re-run on the chosen configuration once it is in the live recommender.

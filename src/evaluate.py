@@ -21,68 +21,14 @@ import numpy as np
 
 import parsers
 import taste
+from scoring import (Catalog, centered, dense_matrix, genre_matrix, head_franchises,  # noqa: F401
+                     make_scorer, matrix_loader, parse_method, zscore)
 
 USERS_DIR = Path("data/eval_users")
 RESULTS_DIR = Path("results")
 
 
 # ---------------------------------------------------------------- catalog
-
-class Catalog:
-    """The searchable index as arrays: one row per title, one franchise id per row."""
-
-    def __init__(self, records):
-        self.records = list(records)
-        self.aid_row = {r["anilist_id"]: i for i, r in enumerate(self.records)}
-        self.franchise_ids = np.array(sorted({r["franchise_id"] for r in self.records}))
-        pos = {f: i for i, f in enumerate(self.franchise_ids)}
-        self.row_franchise = np.array([pos[r["franchise_id"]] for r in self.records])
-        self.franchise_pos = pos
-        self.n_franchises = len(self.franchise_ids)
-        self.episodes = {r["anilist_id"]: r.get("episodes") for r in self.records}
-        pop = np.zeros(self.n_franchises)
-        for r, p in zip(self.records, self.row_franchise):
-            pop[p] = max(pop[p], r.get("popularity") or 0)
-        self.popularity = pop
-
-    def franchise_max(self, title_scores):
-        out = np.full(self.n_franchises, -np.inf)
-        np.maximum.at(out, self.row_franchise, title_scores)
-        return out
-
-
-def genre_matrix(records):
-    """Genres + non-spoiler tags as IDF-weighted, unit-length rows (the 'plain tags' representation)."""
-    vocab = {}
-    for r in records:
-        for t in list(r["genres"]) + list(r["tags"]):
-            vocab.setdefault(t, len(vocab))
-    m = np.zeros((len(records), max(1, len(vocab))))
-    for i, r in enumerate(records):
-        for t in set(list(r["genres"]) + list(r["tags"])):
-            m[i, vocab[t]] = 1.0
-    df = m.sum(axis=0)
-    m *= np.log((1 + len(records)) / (1 + df)) + 1.0
-    norms = np.linalg.norm(m, axis=1, keepdims=True)
-    return m / np.where(norms == 0, 1, norms)
-
-
-def dense_matrix(catalog, model, variant):
-    """Stored embeddings, in catalog row order (needs ChromaDB and a built index)."""
-    import chromadb
-    from build_index import CHROMA_DIR, collection_name
-    col = chromadb.PersistentClient(path=CHROMA_DIR).get_collection(collection_name(model, variant))
-    ids = [str(r["anilist_id"]) for r in catalog.records]
-    vecs = {}
-    for i in range(0, len(ids), 500):
-        res = col.get(ids=ids[i:i + 500], include=["embeddings"])
-        for rid, emb in zip(res["ids"], res["embeddings"]):
-            vecs[rid] = np.asarray(emb, dtype=float)
-    missing = [i for i in ids if i not in vecs]
-    if missing:
-        raise SystemExit(f"{len(missing)} titles are missing from collection '{collection_name(model, variant)}'. "
-                         f"Rebuild it: python src/build_index.py --model {model} --variant {variant}")
-    return np.vstack([vecs[i] for i in ids])
 
 
 # ---------------------------------------------------------------- users
@@ -119,76 +65,6 @@ def pick_held_out(user, per_user, seed, allowed=None):
 
 # ---------------------------------------------------------------- methods
 
-def centered(matrix):
-    """Subtract the average vector, then make every row unit length again."""
-    m = matrix - matrix.mean(axis=0)
-    n = np.linalg.norm(m, axis=1, keepdims=True)
-    return m / np.where(n == 0, 1, n)
-
-
-def zscore(x):
-    sd = x.std()
-    return (x - x.mean()) / (sd if sd > 0 else 1.0)
-
-
-def parse_method(spec):
-    """'minilm/notitle@alpha=0.0@share=1' -> (kind, variant, options)."""
-    head, *opts = spec.split("@")
-    options = {}
-    for o in opts:
-        key, _, val = o.partition("=")
-        if key not in ("alpha", "share", "center", "knn", "pop", "genre") or not val:
-            raise SystemExit(f"Unknown option '{o}' in '{spec}'. Options: alpha, share, center, knn, pop, genre (e.g. @knn=5).")
-        options[key] = float(val)
-    name, _, variant = head.partition("/")
-    return name, variant or "base", options
-
-
-def make_scorer(spec, catalog, matrices):
-    """Returns f(visible_entries, rng) -> one score per franchise (higher = recommend first)."""
-    name, variant, opts = parse_method(spec)
-    if name == "random":
-        return lambda visible, rng: rng.random(catalog.n_franchises)
-    if name == "popularity":
-        return lambda visible, rng: catalog.popularity
-    alpha, share = opts.get("alpha", 0.3), opts.get("share", 0.35)
-    knn, pop_weight, genre_weight = int(opts.get("knn", 0)), opts.get("pop", 0.0), opts.get("genre", 0.0)
-    matrix = matrices(name, variant)
-    if opts.get("center"):
-        matrix = centered(matrix)
-    tags = matrices("genre", "base") if genre_weight and name != "genre" else None
-    log_pop = zscore(np.log1p(catalog.popularity))
-
-    def liked_scores(mat, visible):
-        """One score per franchise from one representation, or None when nothing positive is left."""
-        emb = {e["anilist_id"]: mat[catalog.aid_row[e["anilist_id"]]] for e in visible}
-        t = taste.build_taste(visible, emb, catalog.episodes, share, alpha)
-        if t is None:
-            return None
-        if knn > 0:
-            V, w = taste.liked_vectors(t)
-            sims = mat @ V.T                                     # titles x liked franchises
-            k = min(knn, V.shape[0])
-            near = np.argpartition(-sims, k - 1, axis=1)[:, :k]  # the k most similar liked franchises
-            w_near = w[near]
-            title_scores = (np.take_along_axis(sims, near, axis=1) * w_near).sum(axis=1) / w_near.sum(axis=1)
-        else:
-            title_scores = mat @ t.vector
-        return catalog.franchise_max(title_scores)
-
-    def score(visible, rng):
-        s = liked_scores(matrix, visible)
-        if s is None:
-            return None            # nothing positive left to learn from
-        if tags is not None:
-            g = liked_scores(tags, visible)
-            if g is not None:
-                s = zscore(s) + genre_weight * zscore(g)
-        if pop_weight:
-            s = zscore(s) + pop_weight * log_pop
-        return s
-    return score
-
 
 def rank_of(scores, held_pos, candidate_mask):
     """1-based rank of one franchise among the candidates. Ties are broken by franchise position,
@@ -197,14 +73,6 @@ def rank_of(scores, held_pos, candidate_mask):
     idx = np.flatnonzero(candidate_mask)
     h = scores[held_pos]
     return int(1 + np.sum(s > h) + np.sum((s == h) & (idx < held_pos)))
-
-
-def head_franchises(catalog, n):
-    """Ids of the n most popular franchises (empty when n is 0)."""
-    if not n:
-        return set()
-    order = np.argsort(-catalog.popularity, kind="stable")[:n]
-    return {int(f) for f in catalog.franchise_ids[order]}
 
 
 def evaluate(users, catalog, scorers, per_user=20, seed=0, log=print, tail=0):
@@ -313,14 +181,7 @@ def main():
         sys.exit(f"No users in {args.users_dir}. Run: python src/sample_users.py --target 25 --out {args.users_dir}")
     print(f"{len(users)} users, {catalog.n_franchises} franchises in the index, up to {args.per_user} hidden per user.")
 
-    cache = {}
-
-    def matrices(name, variant):
-        key = (name, variant)
-        if key not in cache:
-            cache[key] = genre_matrix(catalog.records) if name == "genre" else dense_matrix(catalog, name, variant)
-        return cache[key]
-
+    matrices = matrix_loader(catalog)
     scorers = {spec: make_scorer(spec, catalog, matrices) for spec in args.methods}
     started = time.time()
     if args.tail:

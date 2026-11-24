@@ -154,3 +154,17 @@ def test_lone_ova_with_a_parent_link_joins_the_parent():
     ]
     m = build_franchises(records)
     assert m[5] == m[1] == m[2]
+
+
+def test_franchise_of_lists_members_and_relations():
+    import franchise_of
+    recs = [
+        {"anilist_id": 1, "title": "Show", "format": "TV", "year": 2021, "franchise_id": 1,
+         "relations": [{"anilist_id": 2, "media_type": "ANIME", "type": "ALTERNATIVE"}]},
+        {"anilist_id": 2, "title": "Show (2012 OVA)", "format": "OVA", "year": 2012, "franchise_id": 2,
+         "relations": [{"anilist_id": 99, "media_type": "ANIME", "type": "SEQUEL"}]},
+    ]
+    out = "\n".join(franchise_of.describe(recs, "show (2012"))
+    assert "franchise 2" in out and "same franchise: none" in out
+    assert "SEQUEL" in out and "99 (not in the index)" in out
+    assert "ALTERNATIVE" in "\n".join(franchise_of.describe(recs, "Show"))
