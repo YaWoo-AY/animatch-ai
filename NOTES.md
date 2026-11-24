@@ -3,6 +3,27 @@
 A running log of what I tried, what surprised me, and what I changed.
 Newest entries go at the top. This becomes the "What failed and what I'd change" section of the README.
 
+## 2026-11-25 (Step 8): live recommender, demo page and first deployment
+
+**What I did**
+- Moved the scoring from `evaluate.py` into `scoring.py` so the live recommender and the evaluation run the same code. The live default is the configuration chosen before the test run (`minilm@center=1@knn=10@genre=1@pop=0.5`), with the popularity weight and a "leave out the N most popular" option as settings.
+- Ran it on my own list. The recommendations are plausible, but one franchise problem showed up: the 2012 OVA Hori-san to Miyamura-kun came first in one view, although I had watched Horimiya, the same story. `franchise_of.py` showed AniList links the two only as `ALTERNATIVE`, which grouping never merges. Those links now hide the counterpart of anything I have seen, and are never used to merge franchises.
+- Built a Streamlit page over `recommend()`: popularity slider, a "deeper cuts" list shown beside the main one, limits on episodes, year and community score, and "because you liked" lines. No synopsis is shown.
+- Deployed it. The first deployment failed with a file-not-found error, because `data/` is git-ignored (it also holds the sampled users) and the host had no index and no vectors. Fixed by exporting a small bundle (`app_data/`: index without synopses or spoiler tags, plus the vectors), so the page needs neither ChromaDB nor an embedding model.
+
+**What I saw on my own list**
+- Cyberpunk: Edgerunners 2 is recommended to someone who rated the first series highly. AniList links them only as `OTHER`, so grouping does not merge them. I left this as it is; it looks useful.
+- Black Clover leads the default list but its listed reasons are weak. My reading, not tested: the popularity prior is pushing it up.
+- With popularity weight 0, titles with community scores in the 50s and low 60s appear. Nothing in the score knows about quality.
+
+**What failed**
+- The deployment, as above. Lesson: run the page from a clean checkout before deploying, because anything git-ignored is missing there.
+- I guessed that Edgerunners 2 was a sequel the grouping had missed. The relation data said otherwise, which is why I checked before changing anything.
+
+**Next**
+- README with the evaluation table, the partial result stated plainly and the caveats.
+- Grounded, spoiler-free explanations, with a check that they only use supplied facts.
+
 ## 2026-11-24 (Step 7, test run): result of the pre-registered configuration
 
 **What I did**
