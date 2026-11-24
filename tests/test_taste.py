@@ -2,6 +2,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import evaluate as ev
@@ -270,3 +271,33 @@ def test_within_limits_uses_the_stored_sentinels():
     assert not recommend.within_limits({**ok, "episodes": -1}, max_episodes=26)   # unknown length under a cap
     assert not recommend.within_limits({**ok, "year": 2014}, min_year=2015)
     assert recommend.within_limits({**ok, "episodes": -1})                         # no cap, unknown is fine
+
+
+# ---- the deployed bundle ----
+
+def test_runtime_bundle_round_trips_and_drops_unused_text(tmp_path):
+    import export_runtime
+    rows = [{**rec_row(1, 1), "synopsis": "long text", "spoiler_tags": ["Time Loop"], "relations": []},
+            {**rec_row(2, 2), "synopsis": "more", "spoiler_tags": [], "relations": []}]
+    M = np.array([[1.0, 0.0], [0.0, 1.0]])
+    export_runtime.write_bundle(rows, M, tmp_path)
+    saved = __import__("json").loads((tmp_path / "anime.json").read_text(encoding="utf-8"))
+    assert all("synopsis" not in r and "spoiler_tags" not in r for r in saved) and saved[0]["title"] == "T1"
+    # the page may order its catalog differently from the file; vectors must follow the ids
+    catalog = scoring.Catalog(list(reversed(saved)))
+    got = scoring.runtime_matrix_loader(catalog, tmp_path)("minilm", "base")
+    assert got[catalog.aid_row[1]].tolist() == [1.0, 0.0] and got[catalog.aid_row[2]].tolist() == [0.0, 1.0]
+
+
+def test_runtime_loader_says_what_to_do_when_the_bundle_is_missing(tmp_path):
+    catalog = scoring.Catalog([rec_row(1, 1)])
+    with pytest.raises(FileNotFoundError, match="export_runtime"):
+        scoring.runtime_matrix_loader(catalog, tmp_path)("minilm", "base")
+
+
+def test_runtime_loader_refuses_a_bundle_missing_some_titles(tmp_path):
+    import export_runtime
+    export_runtime.write_bundle([rec_row(1, 1)], np.array([[1.0, 0.0]]), tmp_path)
+    catalog = scoring.Catalog([rec_row(1, 1), rec_row(2, 2)])
+    with pytest.raises(ValueError, match="no vector"):
+        scoring.runtime_matrix_loader(catalog, tmp_path)("minilm", "base")

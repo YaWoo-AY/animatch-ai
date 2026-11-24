@@ -4,9 +4,13 @@ Run from the project root, in the terminal whose prompt starts with (.venv):
     streamlit run app.py
 """
 import sys
+import tempfile
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
+ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT / "src"))
+RUNTIME = ROOT / "app_data"                                  # written by src/export_runtime.py
+PROFILE_CACHE = Path(tempfile.gettempdir()) / "animatch_profiles"
 
 import streamlit as st  # noqa: E402
 
@@ -19,9 +23,9 @@ st.set_page_config(page_title="AniMatch AI", layout="wide")
 
 @st.cache_resource(show_spinner="Loading the anime index (first time only)...")
 def load_catalog():
-    index = parsers.load_index()
+    index = parsers.load_index(RUNTIME / "anime.json")
     catalog = scoring.Catalog(index["by_anilist"].values())
-    matrices = scoring.matrix_loader(catalog)
+    matrices = scoring.runtime_matrix_loader(catalog, RUNTIME)
     matrices("minilm", "base")      # read the stored vectors once, not on every click
     matrices("genre", "base")
     records = list(index["by_anilist"].values())
@@ -30,7 +34,7 @@ def load_catalog():
 
 @st.cache_data(ttl=3600, show_spinner="Reading the watchlist...")
 def load_profile(platform, username):
-    return parsers.get_profile(platform, username)
+    return parsers.get_profile(platform, username, cache_dir=PROFILE_CACHE)
 
 
 def render(recs):
@@ -53,7 +57,8 @@ def render(recs):
 
 st.title("AniMatch AI")
 st.caption("Recommendations from your public AniList or MyAnimeList, with no spoilers. "
-           "Nothing you enter is stored beyond a short-lived cache of your list.")
+           "Nothing you enter is stored beyond a short-lived cache of your list. "
+           "Anime data and cover images are from AniList.")
 
 with st.sidebar:
     st.header("Your list")
@@ -63,7 +68,7 @@ with st.sidebar:
         load_profile.clear()
         if username:
             try:
-                parsers.get_profile(platform, username, refresh=True)
+                parsers.get_profile(platform, username, refresh=True, cache_dir=PROFILE_CACHE)
             except parsers.ProfileError:
                 pass            # the same error is shown below
     st.header("Style")

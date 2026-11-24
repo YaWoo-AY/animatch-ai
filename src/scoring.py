@@ -4,6 +4,8 @@ A method is a string such as `minilm@center=1@knn=10@genre=1@pop=0.5` (options a
 DECISIONS.md). `make_scorer` turns it into a function that gives every franchise one score from
 a user's list. The chosen configuration is DEFAULT_SPEC.
 """
+from pathlib import Path
+
 import numpy as np
 
 import taste
@@ -94,6 +96,30 @@ def title_matrix(spec, matrices):
     name, variant, opts = parse_method(spec)
     matrix = matrices(name, variant)
     return centered(matrix) if opts.get("center") else matrix
+
+
+def runtime_matrix_loader(catalog, directory):
+    """Like matrix_loader, but the stored vectors come from `<name>_<variant>.npz` files written by
+    export_runtime.py, so the deployed page needs neither ChromaDB nor an embedding model."""
+    cache = {}
+
+    def matrices(name, variant):
+        key = (name, variant)
+        if key not in cache:
+            if name == "genre":
+                cache[key] = genre_matrix(catalog.records)
+            else:
+                path = Path(directory) / f"{name}_{variant}.npz"
+                if not path.exists():
+                    raise FileNotFoundError(f"{path} is missing. Run: python src/export_runtime.py")
+                z = np.load(path)
+                row = {int(i): j for j, i in enumerate(z["ids"])}
+                missing = [r["anilist_id"] for r in catalog.records if r["anilist_id"] not in row]
+                if missing:
+                    raise ValueError(f"{len(missing)} titles have no vector in {path}. Run export_runtime.py again.")
+                cache[key] = z["vectors"][[row[r["anilist_id"]] for r in catalog.records]].astype(float)
+        return cache[key]
+    return matrices
 
 
 def matrix_loader(catalog):
