@@ -103,7 +103,7 @@ def item_facts(rec, facts):
     pick = facts.by_id[rec["anilist_id"]]
     pick_attrs = _attrs(pick)
     liked = []
-    for fid, title in zip(rec["because_franchises"], [t for t, _ in rec["because"]]):
+    for fid, title in zip(rec.get("because_franchises", []), [t for t, _ in rec.get("because", [])]):
         lr = facts.liked_record(fid, title)
         if lr is None:
             continue

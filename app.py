@@ -148,7 +148,11 @@ def notes_for(recs):
     """Explanations for a list, or None when they are off (or cannot be checked)."""
     if not (use_ai and spoiler_terms is not None and recs):
         return None
-    notes, error = explain.explain_picks(recs, facts, spoiler_terms, llm)
+    try:
+        notes, error = explain.explain_picks(recs, facts, spoiler_terms, llm)
+    except Exception as e:             # an optional feature must not take the page down
+        st.caption(f"Explanations are unavailable right now ({e.__class__.__name__}); showing the plain list.")
+        return None
     if error:
         st.caption(f"The language model was not used this time ({error}); showing plain explanations.")
     return notes

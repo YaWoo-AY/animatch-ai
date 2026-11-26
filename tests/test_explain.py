@@ -256,3 +256,12 @@ def test_reasoning_effort_is_sent_only_when_it_applies(monkeypatch, tmp_path):
     explain.call_llm([], base)
     explain.call_llm([], {**base, "reasoning_effort": "low"})
     assert "reasoning_effort" not in sent[0] and sent[1]["reasoning_effort"] == "low"
+
+
+def test_a_recommendation_without_explanation_fields_degrades_to_the_template():
+    bare = {"anilist_id": 10}                       # e.g. produced by an older recommend.py
+    it = item_facts(bare, FACTS)
+    assert it["liked"] == []
+    assert template_sentence(it) == "Matches the overall shape of your list."
+    res, err = explain_picks([bare], FACTS, SPOILERS, config=None, use_cache=False)
+    assert res[0]["source"] == "template"
