@@ -3,6 +3,28 @@
 A running log of what I tried, what surprised me, and what I changed.
 Newest entries go at the top. This becomes the "What failed and what I'd change" section of the README.
 
+## 2026-11-26 (Step 10): a quality prior, tested on a second set of users
+
+**What I did**
+- My own list showed picks with community scores in the 50s and low 60s, so I added a community-score term to the ranking (`@qual=w`), plus a baseline that ranks by community score alone.
+- Dev users, first pass: more quality weight kept helping, up to the largest value I tried, which is not a place to stop. Second pass with larger weights: an optimum around 1.5 to 2 in the all-franchises view. I wrote down one configuration (`@qual=2`) and the rule for adopting it, committed that, then ran it once on 25 new users.
+
+**Result on the new users:** passes the rule. Better than the previous default in two of three views (top 300 removed: +3.9 pts; all franchises: +7.4 pts), not clearly different with the top 1000 removed. Compared with popularity: a tie on the full catalog (15.8% each) and clearly better with the top 300 or 1,000 removed. Compared with community score alone: clearly better in two views. Full table in DECISIONS.
+
+**What surprised me**
+- The old default was clearly worse than popularity on the full catalog on both sets of users. The quality prior closed the gap exactly (15.8% against 15.8%), which looks too neat; the interval is wide (-4.2 to +3.8 pts).
+- Community score alone is a strong baseline: with the top 1000 removed it did as well as the old default.
+
+**Caveats**
+- The test rewards a quality prior by construction: the hidden title is one the user rated highly, and community score predicts personal ratings. It does not show the picks are more enjoyable.
+- I have not looked at the live list since the change. The point was to remove low-scored picks; I should check that it did.
+- The weight was chosen from several values on 25 users, which overstates it. The second set is independent of that choice and is now spent.
+- Four users dropped out of the top-1000 view for having no liked titles outside the most popular 1,000.
+
+**Next**
+- Check the live list on my own profile and on one or two others.
+- Update the README table and the hosted page.
+
 ## 2026-11-26 (Step 9): checked language-model explanations
 
 **What I did**

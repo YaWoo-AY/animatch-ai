@@ -4,7 +4,7 @@ Run from the project root, in the terminal whose prompt starts with (.venv):
     python src/recommend.py anilist <username>
     python src/recommend.py mal <username> -k 15
     python src/recommend.py anilist <username> --max-episodes 26 --min-year 2015 --min-score 70
-    python src/recommend.py anilist <username> --pop 0                # taste only, no popularity prior
+    python src/recommend.py anilist <username> --pop 0 --qual 0       # taste only, no popularity or quality prior
     python src/recommend.py anilist <username> --skip-popular 300     # deeper cuts: drop the 300 most popular
     python src/recommend.py anilist <username> --hide-planned         # also hide plan-to-watch titles
     python src/recommend.py anilist <username> --keep-retellings      # do not hide retellings of seen titles
@@ -72,8 +72,8 @@ def retelling_links(records):
     return links
 
 
-def build_spec(model="minilm", variant="base", alpha=0.3, share=0.35, knn=10, genre=1.0, pop=0.5):
-    return f"{model}/{variant}@alpha={alpha}@share={share}@center=1@knn={knn}@genre={genre}@pop={pop}"
+def build_spec(model="minilm", variant="base", alpha=0.3, share=0.35, knn=10, genre=1.0, pop=0.5, qual=2.0):
+    return f"{model}/{variant}@alpha={alpha}@share={share}@center=1@knn={knn}@genre={genre}@pop={pop}@qual={qual}"
 
 
 def recommend(matched, catalog, matrices, spec=scoring.DEFAULT_SPEC, k=10, limits=None, starts=None,
@@ -159,6 +159,7 @@ def main():
     ap.add_argument("--knn", type=int, default=10, help="score by the K nearest liked franchises (0 = average of all)")
     ap.add_argument("--genre", type=float, default=1.0, help="weight of the genre/tag score (0 = embeddings only)")
     ap.add_argument("--pop", type=float, default=0.5, help="weight of the popularity prior (0 = none)")
+    ap.add_argument("--qual", type=float, default=2.0, help="weight of the community-score prior (0 = none)")
     ap.add_argument("--skip-popular", type=int, default=0, metavar="N",
                     help="leave out the N most popular franchises (deeper cuts)")
     ap.add_argument("--hide-planned", action="store_true")
@@ -181,7 +182,7 @@ def main():
     print(f"{len(entries)} entries, {len(matched)} in our index, {len(unmatched)} not (ignored).")
 
     catalog = scoring.Catalog(index["by_anilist"].values())
-    spec = build_spec(args.model, args.variant, args.alpha, args.unrated_share, args.knn, args.genre, args.pop)
+    spec = build_spec(args.model, args.variant, args.alpha, args.unrated_share, args.knn, args.genre, args.pop, args.qual)
     limits = dict(max_episodes=args.max_episodes, min_year=args.min_year, min_score=args.min_score)
     model, recs = recommend(matched, catalog, scoring.matrix_loader(catalog), spec, args.k, limits,
                             hide_planned=args.hide_planned, skip_popular=args.skip_popular,

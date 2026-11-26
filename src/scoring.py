@@ -10,8 +10,8 @@ import numpy as np
 
 import taste
 
-# Chosen on the dev users and run once on the test users (see DECISIONS.md, Evaluation protocol).
-DEFAULT_SPEC = "minilm@center=1@knn=10@genre=1@pop=0.5"
+# Chosen on the dev users, then confirmed once on two separate sets of new users (see DECISIONS.md).
+DEFAULT_SPEC = "minilm@center=1@knn=10@genre=1@pop=0.5@qual=2"
 
 
 class Catalog:

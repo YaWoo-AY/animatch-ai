@@ -81,8 +81,9 @@ with st.sidebar:
                 pass            # the same error is shown below
     st.header("Style")
     pop = st.slider("Popularity weight", 0.0, 2.0, 0.5, 0.1,
-                    help="0 = taste only. Higher = lean towards what most people watch. "
-                         "On held-out favourites, a blend of 0.5 beat plain popularity on less popular titles.")
+                    help="0 = taste only. Higher = lean towards what most people watch.")
+    qual = st.slider("Quality weight", 0.0, 3.0, 2.0, 0.5,
+                     help="0 = ignore community scores. Higher = lean towards well-reviewed titles.")
     compare = st.toggle("Compare with a 'deeper cuts' list", help="Second list leaves out the most popular titles.")
     skip = st.slider("Deeper cuts: leave out the most popular", 0, 1000, 300, 100) if compare else 0
     st.header("Limits")
@@ -122,7 +123,7 @@ matched, unmatched = parsers.match_to_index(entries, index)
 st.write(f"{len(entries)} entries, {len(matched)} in the index, {len(unmatched)} not (ignored).")
 
 limits = dict(max_episodes=max_eps or None, min_year=min_year or None, min_score=min_score or None)
-spec = recommend.build_spec(pop=pop)
+spec = recommend.build_spec(pop=pop, qual=qual)
 
 
 def run(skip_popular):

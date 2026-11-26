@@ -32,10 +32,10 @@ is mixed, and this page says so.
 2. **Vectors.** Each title is embedded (all-MiniLM-L6-v2) from its genres, non-spoiler tags and
    synopsis, and stored in ChromaDB. A second representation is an IDF-weighted genre and tag
    vector.
-3. **Taste and scoring.** The method that ships is `minilm@center=1@knn=10@genre=1@pop=0.5`:
+3. **Taste and scoring.** The method that ships is `minilm@center=1@knn=10@genre=1@pop=0.5@qual=2`:
    embeddings with the shared "typical anime" component removed, scored against the 10 nearest
-   liked franchises, fused with the tag score, plus a popularity prior. The popularity weight is a
-   slider on the page.
+   liked franchises, fused with the tag score, plus a popularity prior and a community-score prior.
+   Both weights are sliders on the page.
 4. **Deeper cuts.** A toggle shows a second list with the most popular franchises left out.
 
 ## How I evaluated it
@@ -48,36 +48,49 @@ the rest, and see where the hidden franchise ranks among everything they have no
 the share of hidden franchises that land in the top 10, averaged per user, with 95% intervals from
 resampling users. Baselines: random, popularity, and a genre/tag vector.
 
-**Users.** 25 public AniList users, sampled from the recent-activity feed, stored as ids and
-scores only. A second set of 25 different users was kept untouched. I compared methods on the first
-set, wrote down one configuration and the success rule, then ran the second set once.
+**Users.** Three separate sets of 25 public AniList users, sampled from the recent-activity feed and
+stored as ids and scores only. I compared methods on the first set (development). For each later
+change I wrote down one configuration and a success rule first, committed it, then ran a set of
+users that had not been used to choose it, once.
 
-**Two views.** Popularity alone is a very strong baseline, because the hidden title is something
+**Three views.** Popularity alone is a very strong baseline, because the hidden title is something
 the user chose to watch and people mostly watch popular things. So I report the full catalog and
 two views with the 300 or 1,000 most popular franchises removed, which asks whether the system finds
 less obvious titles.
 
-**Result on the untouched test users** (Recall@10, paired difference to popularity):
+**Round 1** (second set of users): the first configuration, without a quality term. The result was
+partial: clearly better than popularity with the 1,000 most popular titles removed (+9.8 pts), not
+clearly different with the top 300 removed (+4.0 pts, interval -0.3 to +8.5), and not clearly different
+on the full catalog (-1.9 pts, interval -9.1 to +5.2; 13.3% against 15.2% for popularity). The same
+configuration was clearly worse than popularity on the full catalog on the third set of users.
 
-| View | Popularity | AniMatch | Difference [95% CI] |
-|---|---|---|---|
-| Top 1,000 removed (217 hidden) | 0.2% | 10.1% | +9.8 pts [+3.0, +19.9] |
-| Top 300 removed (370 hidden) | 3.7% | 7.7% | +4.0 pts [-0.3, +8.5] |
-| All franchises (487 hidden) | 15.2% | 13.3% | -1.9 pts [-9.1, +5.2] |
+**Round 2** (third set of users): I added a community-score term (my own list had shown low-scored
+picks), tuned its weight on the development users and committed the choice and the rule. Recall@10:
 
-By the rule I wrote beforehand this is a **partial success**: clearly better than popularity when
-the 1,000 most popular titles are removed, not clearly different in the other two views. It does
-not beat plain popularity on the full catalog.
+| View | Popularity | Community score alone | Round 1 configuration | Current (with quality term) |
+|---|---|---|---|---|
+| Top 1,000 removed (194 hidden) | 1.8% | 11.6% | 10.9% | 17.0% |
+| Top 300 removed (404 hidden) | 4.5% | 3.0% | 6.9% | 10.8% |
+| All franchises (500 hidden) | 15.8% | 8.2% | 8.4% | 15.8% |
+
+Paired against the Round 1 configuration the current one is clearly better with the top 300 removed
+(+3.9 pts [+0.7, +7.8]) and on all franchises (+7.4 pts [+4.2, +10.8]), and not clearly different with
+the top 1,000 removed (+6.1 pts [-5.9, +19.0]), which met the adoption rule. Against popularity it is
+a tie on the full catalog (+0.0 pts [-4.2, +3.8]) and clearly better with the top 300
+(+6.3 pts) or the top 1,000 (+15.2 pts) removed. It is clearly better than community score alone in
+two of the three views.
 
 **What I learned**
 - Text embeddings compared directly were about as good as random until I centered the vectors, and
-  worse than random once popular titles were removed. Centering and a popularity prior mattered more
-  than the choice of embedding model.
+  worse than random once popular titles were removed. Centering, a popularity prior and a quality prior
+  mattered more than the choice of embedding model.
 - Scoring by the nearest few liked titles looked best on one setting of K and poor on others. I did
   not trust the best of a dozen settings, and picked the configuration that held up in both tail
   views instead.
 - The genre/tag vector alone was better than popularity when the 1,000 most popular titles were
   removed and clearly worse on the full catalog.
+- Community score alone is a strong baseline once the very popular titles are removed: with the top
+  1,000 removed it did as well as my first configuration.
 - Retellings slipped through as "unseen": a 2012 OVA of a story I had just watched was recommended
   first, because AniList links them only as `ALTERNATIVE`. They are now hidden, which the evaluation
   above did not include.
@@ -85,11 +98,12 @@ not beat plain popularity on the full catalog.
 ## Limits
 
 - The test measures finding things you already watched and loved, not whether a new recommendation
-  would be enjoyed. It favors popular titles. It is a proxy for comparing versions.
+  would be enjoyed. It favors popular and well-reviewed titles. It is a proxy for comparing versions.
 - 25 users sampled from an activity feed favor people who update often. The tail views rest on a few
   hundred hidden titles, and some users contribute one or two.
-- Nothing in the score knows about quality. Titles with low community scores can appear, especially
-  with the popularity weight at 0.
+- The community-score term is rewarded by how the test is built: the hidden title is one the user rated
+  highly, and community score predicts personal ratings. The test does not show that the picks are more
+  enjoyable or more novel. With the quality weight at 0, low-scored titles can appear.
 - Only the top 5,000 titles, no shorts or specials, and no adult titles. About 8% of my own list's
   entries were not in the index.
 - Related titles linked only as `OTHER`, and TV side stories, count as separate franchises, so a
@@ -129,7 +143,7 @@ python src/fetch_anilist.py --pages 100    # crawl
 python src/franchise.py                    # group into franchises
 python src/build_index.py                  # embed into ChromaDB
 python src/export_runtime.py               # write app_data/ for the page
-python src/evaluate.py --methods popularity genre minilm@center=1@knn=10@genre=1@pop=0.5
+python src/evaluate.py --methods popularity quality minilm@center=1@knn=10@genre=1@pop=0.5@qual=2
 pytest
 ```
 

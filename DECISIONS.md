@@ -175,7 +175,7 @@ What I take from it:
 ## Live recommender
 
 - **One scoring code path.** `scoring.py` holds the method parser, the scorer and the catalog arrays. `evaluate.py` and `recommend.py` both import it, so what was measured is what runs. A test checks that the live ranking equals the scorer's ranking.
-- **Default: `minilm@center=1@knn=10@genre=1@pop=0.5`,** the configuration chosen before the test run. The popularity weight is a flag (`--pop`), because the right amount depends on what the user wants from the list.
+- **Default: `minilm@center=1@knn=10@genre=1@pop=0.5@qual=2`,** the earlier configuration plus the community-score prior (see the quality prior sections). It was chosen on the dev users and confirmed once on new users. The popularity and quality weights are flags (`--pop`, `--qual`), because the right amount depends on what the user wants from the list.
 - **Deeper cuts:** `--skip-popular N` removes the N most popular franchises, the same view the evaluation used in its tail runs. Whether the app shows one list or two ("popular picks" and "deeper cuts") is still open.
 - **Retrieval no longer goes through ChromaDB queries.** Scoring needs every franchise (the tag score and the nearest-liked score are computed over all of them), so vectors are read from ChromaDB once and scored with numpy. At about 3,000 franchises this is fast; it would need revisiting for a catalog many times larger.
 - **Retellings are hidden, not merged.** AniList's `ALTERNATIVE` links (Horimiya and the 2012 Hori-san to Miyamura-kun OVA) hide a franchise when its counterpart has been seen, so you are not sent to another telling of a story you know. They are never used to merge franchises, because `ALTERNATIVE` also covers loosely related versions, and the cost of over-hiding falls on titles that might be new. `--keep-retellings` switches it off. This rule is not in the evaluation, which was run without it.
@@ -210,6 +210,29 @@ What I take from it:
 - **Chosen for the confirmatory run: `minilm@center=1@knn=10@genre=1@pop=0.5@qual=2`.** Reason: best or tied-best in all three dev views among the weights that showed an interior optimum (the all-franchises view fell at 3). The weights 1.5 and 2 were indistinguishable; 2 is picked for the top-300 and top-1000 views. Picking the best of several settings on 25 users overstates it.
 - **Comparators on the new users** (`data/test_users2`): popularity, quality alone, the current default, and the chosen configuration. Paired differences are reported against the current default (the decision), and also against popularity and against quality alone (what the result means).
 - **Rule, fixed before the confirmatory run:** adopt `@qual=2` as the live default only if the paired Recall@10 difference to the current default has a lower bound above zero in at least two of the three views and is not clearly negative in the third. If it fails, the default stays as it is and the README says so. The comparisons with popularity and with quality alone are reported whatever they show.
+
+### Quality prior: confirmatory result (new users, run once, 2026-11-26)
+
+`minilm@center=1@knn=10@genre=1@pop=0.5@qual=2` on 25 new users (`data/test_users2`), Recall@10:
+
+| View | Popularity | Quality alone | Previous default | With quality prior |
+|---|---|---|---|---|
+| Top 1,000 removed (194 hidden, 21 users) | 1.8% | 11.6% | 10.9% | 17.0% |
+| Top 300 removed (404 hidden) | 4.5% | 3.0% | 6.9% | 10.8% |
+| All franchises (500 hidden) | 15.8% | 8.2% | 8.4% | 15.8% |
+
+Paired Recall@10 difference of the new configuration, with 95% interval:
+
+| View | vs previous default (the decision) | vs popularity | vs quality alone |
+|---|---|---|---|
+| Top 1,000 removed | +6.1 [-5.9, +19.0] not clearly different | +15.2 [+5.2, +26.6] better | +5.4 [-0.5, +12.3] not clearly different |
+| Top 300 removed | +3.9 [+0.7, +7.8] better | +6.3 [+1.6, +11.7] better | +7.8 [+3.6, +13.1] better |
+| All franchises | +7.4 [+4.2, +10.8] better | +0.0 [-4.2, +3.8] not clearly different | +7.6 [+5.2, +10.2] better |
+
+- **By the rule written beforehand: adopted.** The lower bound is above zero in two of three views (top 300, all franchises), and the third is not clearly negative.
+- **What it means:** the blend ties popularity on the full catalog (15.8% each) and beats it clearly when the most popular titles are removed. It also beats community score alone in two views. The earlier configuration was clearly worse than popularity on the full catalog on both sets of users; adding the quality prior closed that gap.
+- **What it does not mean:** the test hides a title the user rated highly, and community score predicts personal ratings, so a quality prior is rewarded by how the test is built. It does not show that the recommendations are more enjoyable or more novel. In the top-1000 view, community score alone (11.6%) did about as well as the previous default and the interval against it includes zero.
+- The weight (2) was chosen on the dev users; these users did not take part in choosing it. They are now spent for this question, and so is any further tuning of the same weights.
 
 ## Open decisions
 
