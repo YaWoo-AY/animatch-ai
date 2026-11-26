@@ -155,7 +155,7 @@ def notes_for(recs):
         st.caption(f"Explanations are unavailable right now ({e.__class__.__name__}); showing the plain list.")
         return None
     if error:
-        st.caption(f"The language model was not used this time ({error}); showing plain explanations.")
+        st.caption(f"Some explanations are plain because the language model could not be used ({error}).")
     return notes
 
 
