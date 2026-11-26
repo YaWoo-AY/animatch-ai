@@ -3,9 +3,9 @@
 A spoiler-free anime recommender. Give it your public AniList or MyAnimeList username and it
 suggests shows you have not seen, with the titles you liked that led to each pick.
 
-**Live demo:** [ADD YOUR STREAMLIT LINK HERE]
+**Live demo:** [https://animatch-ai.streamlit.app/]
 
-![The page with the main list and a "deeper cuts" list side by side](docs/screenshot.png)
+![The page with the main list and a "deeper cuts" list side by side](docs/mainpage.png)
 
 I built it to learn how to evaluate a recommender honestly, not only to make one. The main result
 is mixed, and this page says so.
