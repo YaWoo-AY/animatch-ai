@@ -303,3 +303,37 @@ def test_users_dir_is_read_from_the_folder_given(tmp_path):
     index = {"by_anilist": {1: {"anilist_id": 1, "mal_id": None, "franchise_id": 1, "title": "T"}}, "by_mal": {}}
     users = ev.load_users(index, tmp_path)
     assert [u.id for u in users] == ["u001"] and len(users[0].matched) == 1
+
+
+def test_quality_is_the_franchise_maximum_with_unknowns_at_the_median():
+    import scoring
+    rows = [{"anilist_id": 1, "franchise_id": 1, "score": 60, "popularity": 1},
+            {"anilist_id": 2, "franchise_id": 1, "score": 80, "popularity": 1},
+            {"anilist_id": 3, "franchise_id": 2, "score": None, "popularity": 1},
+            {"anilist_id": 4, "franchise_id": 3, "score": 50, "popularity": 1}]
+    cat = scoring.Catalog(rows)
+    assert cat.quality.tolist() == [80.0, 65.0, 50.0]          # unknown franchise 2 = median of 80 and 50
+
+
+def test_the_qual_option_orders_by_community_score_when_large():
+    import scoring
+    import taste
+    rows = [{"anilist_id": i, "mal_id": None, "title": f"T{i}", "franchise_id": i, "format": "TV", "year": 2010,
+             "episodes": 12, "score": sc, "popularity": 100, "genres": [], "tags": [], "cover": None}
+            for i, sc in [(1, 70), (2, 50), (3, 60), (4, 90)]]
+    cat = scoring.Catalog(rows)
+    M = np.array([[1.0, 0.0], [0.9, 0.1], [0.9, 0.1], [0.9, 0.1]])
+    scorer = scoring.make_scorer("minilm@center=0@knn=0@qual=1000", cat, lambda n, v: M)
+    s = scorer([{"anilist_id": 1, "franchise_id": 1, "title": "T1", "status": "completed", "score": 10, "progress": 12}],
+               np.random.default_rng(0))
+    order = [int(cat.franchise_ids[i]) for i in np.argsort(-s)]
+    assert order[:3] == [4, 1, 3] and order[3] == 2             # by score; franchise 1 is liked, so it is also scored
+    assert scoring.parse_method("minilm@qual=0.5")[2] == {"qual": 0.5}
+
+
+def test_quality_baseline_ranks_by_community_score_and_ignores_the_user():
+    import scoring
+    rows = [{"anilist_id": i, "franchise_id": i, "score": sc, "popularity": 1} for i, sc in [(1, 70), (2, 90), (3, 50)]]
+    cat = scoring.Catalog(rows)
+    scorer = scoring.make_scorer("quality", cat, lambda n, v: None)
+    assert scorer([], np.random.default_rng(0)).tolist() == [70.0, 90.0, 50.0]

@@ -30,6 +30,15 @@ class Catalog:
         for r, p in zip(self.records, self.row_franchise):
             pop[p] = max(pop[p], r.get("popularity") or 0)
         self.popularity = pop
+        # community score of the best-scored title in each franchise; unknown scores get the median
+        # so a franchise with no score is neither rewarded nor punished
+        known = np.full(self.n_franchises, np.nan)
+        for r, p in zip(self.records, self.row_franchise):
+            sc = r.get("score")
+            if sc is not None and sc >= 0:
+                known[p] = sc if np.isnan(known[p]) else max(known[p], sc)
+        median = np.nanmedian(known) if not np.all(np.isnan(known)) else 0.0
+        self.quality = np.where(np.isnan(known), median, known)
 
     def franchise_max(self, title_scores):
         out = np.full(self.n_franchises, -np.inf)
@@ -84,8 +93,8 @@ def parse_method(spec):
     options = {}
     for o in opts:
         key, _, val = o.partition("=")
-        if key not in ("alpha", "share", "center", "knn", "pop", "genre") or not val:
-            raise SystemExit(f"Unknown option '{o}' in '{spec}'. Options: alpha, share, center, knn, pop, genre (e.g. @knn=5).")
+        if key not in ("alpha", "share", "center", "knn", "pop", "genre", "qual") or not val:
+            raise SystemExit(f"Unknown option '{o}' in '{spec}'. Options: alpha, share, center, knn, pop, genre, qual (e.g. @knn=5).")
         options[key] = float(val)
     name, _, variant = head.partition("/")
     return name, variant or "base", options
@@ -141,11 +150,15 @@ def make_scorer(spec, catalog, matrices):
         return lambda visible, rng: rng.random(catalog.n_franchises)
     if name == "popularity":
         return lambda visible, rng: catalog.popularity
+    if name == "quality":                 # community score alone, ignoring the user: the baseline for @qual
+        return lambda visible, rng: catalog.quality
     alpha, share = opts.get("alpha", 0.3), opts.get("share", 0.35)
     knn, pop_weight, genre_weight = int(opts.get("knn", 0)), opts.get("pop", 0.0), opts.get("genre", 0.0)
+    qual_weight = opts.get("qual", 0.0)
     matrix = title_matrix(spec, matrices)
     tags = matrices("genre", "base") if genre_weight and name != "genre" else None
     log_pop = zscore(np.log1p(catalog.popularity))
+    quality = zscore(catalog.quality)
 
     def liked_scores(mat, visible):
         """One score per franchise from one representation, or None when nothing positive is left."""
@@ -172,8 +185,8 @@ def make_scorer(spec, catalog, matrices):
             g = liked_scores(tags, visible)
             if g is not None:
                 s = zscore(s) + genre_weight * zscore(g)
-        if pop_weight:
-            s = zscore(s) + pop_weight * log_pop
+        if pop_weight or qual_weight:
+            s = zscore(s) + pop_weight * log_pop + qual_weight * quality
         return s
     return score
 
