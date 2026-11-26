@@ -8,34 +8,25 @@ suggests shows you have not seen, with the titles you liked that led to each pic
 ![The page with the main list and a "deeper cuts" list side by side](docs/mainpage.png)
 
 I built it to learn how to evaluate a recommender honestly, not only to make one. The main result
-is mixed, and this page says so.
+is mixed, and this page says so: on the full catalog it ties a popularity baseline, and it is
+clearly better only once the most popular titles are taken out.
+
+Not affiliated with AniList or MyAnimeList. A personal project, not a product.
 
 ## What it does
 
 - Reads a public watchlist from AniList or MyAnimeList (official API, no login).
-- Builds a taste profile from ratings, falling back to completed, watching and dropped status for
-  the many titles people never rate. Unrated titles count, but with a cap, so hundreds of them
-  cannot outvote a few deliberate high ratings.
-- Hides everything you have already seen, counting a whole franchise as seen (all seasons, movies
-  and OVAs), plus other versions of the same story.
-- Ranks the rest by taste and shows each pick at its first entry, with the liked titles that
-  explain it.
+- Builds a taste profile from ratings, falling back to completed, watching and dropped status for the many titles people never rate. Unrated titles count, but with a cap, so hundreds of them cannot outvote a few deliberate high ratings.
+- Hides everything you have already seen, counting a whole franchise as seen (all seasons, movies and OVAs), plus other versions of the same story.
+- Ranks the rest by taste and shows each pick at its first entry, with the liked titles that explain it.
 - Optionally writes one short sentence per pick with a language model, checked against the facts it was given (below).
-- Shows no synopsis and no spoiler-flagged tags. Filters: episode count, release year, community
-  score.
+- Shows no synopsis and no spoiler-flagged tags. Filters: episode count, release year, community score.
 
 ## How it works
 
-1. **Data.** The 5,000 most popular anime on AniList (TV, movie, ONA, OVA; adult titles excluded).
-   4,869 have a synopsis and a release, and are grouped into 3,013 franchises from AniList's
-   relation links.
-2. **Vectors.** Each title is embedded (all-MiniLM-L6-v2) from its genres, non-spoiler tags and
-   synopsis, and stored in ChromaDB. A second representation is an IDF-weighted genre and tag
-   vector.
-3. **Taste and scoring.** The method that ships is `minilm@center=1@knn=10@genre=1@pop=0.5@qual=2`:
-   embeddings with the shared "typical anime" component removed, scored against the 10 nearest
-   liked franchises, fused with the tag score, plus a popularity prior and a community-score prior.
-   Both weights are sliders on the page.
+1. **Data.** The 5,000 most popular anime on AniList (TV, movie, ONA, OVA; adult titles excluded). 4,869 have a synopsis and a release, and are grouped into 3,013 franchises from AniList's relation links.
+2. **Vectors.** Each title is embedded (all-MiniLM-L6-v2) from its genres, non-spoiler tags and synopsis, and stored in ChromaDB. A second representation is an IDF-weighted genre and tag vector.
+3. **Taste and scoring.** The method that ships is `minilm@center=1@knn=10@genre=1@pop=0.5@qual=2`: embeddings with the shared "typical anime" component removed, scored against the 10 nearest liked franchises, fused with the tag score, plus a popularity prior and a community-score prior. Both weights are sliders on the page.
 4. **Deeper cuts.** A toggle shows a second list with the most popular franchises left out.
 
 ## How I evaluated it
@@ -81,19 +72,11 @@ a tie on the full catalog (+0.0 pts [-4.2, +3.8]) and clearly better with the to
 two of the three views.
 
 **What I learned**
-- Text embeddings compared directly were about as good as random until I centered the vectors, and
-  worse than random once popular titles were removed. Centering, a popularity prior and a quality prior
-  mattered more than the choice of embedding model.
-- Scoring by the nearest few liked titles looked best on one setting of K and poor on others. I did
-  not trust the best of a dozen settings, and picked the configuration that held up in both tail
-  views instead.
-- The genre/tag vector alone was better than popularity when the 1,000 most popular titles were
-  removed and clearly worse on the full catalog.
-- Community score alone is a strong baseline once the very popular titles are removed: with the top
-  1,000 removed it did as well as my first configuration.
-- Retellings slipped through as "unseen": a 2012 OVA of a story I had just watched was recommended
-  first, because AniList links them only as `ALTERNATIVE`. They are now hidden, which the evaluation
-  above did not include.
+- Text embeddings compared directly were about as good as random until I centered the vectors, and worse than random once popular titles were removed. Centering, a popularity prior and a quality prior mattered more than the choice of embedding model.
+- Scoring by the nearest few liked titles looked best on one setting of K and poor on others. I did not trust the best of a dozen settings, and picked the configuration that held up in both tail views instead.
+- The genre/tag vector alone was better than popularity when the 1,000 most popular titles were removed and clearly worse on the full catalog.
+- Community score alone is a strong baseline once the very popular titles are removed: with the top 1,000 removed it did as well as my first configuration.
+- Retellings slipped through as "unseen": a 2012 OVA of a story I had just watched was recommended first, because AniList links them only as `ALTERNATIVE`. They are now hidden, which the evaluation above did not include.
 
 ## Limits
 
@@ -108,7 +91,12 @@ two of the three views.
   entries were not in the index.
 - Related titles linked only as `OTHER`, and TV side stories, count as separate franchises, so a
   sequel can be recommended to someone who liked the first series.
-- The optional one-sentence explanations are checked for what they name, not for tone or usefulness, and a spoiler that is not in my spoiler-tag list would pass. They go through a free hosted model, so the hosted page will often fall back to a plain template.
+- The optional one-sentence explanations are checked for what they name, not for tone or
+  usefulness, and a spoiler that is not in my spoiler-tag list would pass.
+- Explanations go through a free hosted model with rate limits, so the hosted page sometimes falls
+  back to a plain template sentence.
+- Picks with only a weak resemblance to anything you liked still get a sentence, which can make the
+  link sound stronger than it is.
 
 ## Explanations
 
@@ -121,10 +109,12 @@ from the same facts. Nothing unchecked is shown.
 
 On 10 development users (100 picks), 98 sentences passed the check on the final run. The two that
 failed were a sentence containing a spoiler-flagged term, which the model produced from its own
-knowledge of the show, and one with an attribute that was not in the supplied list. The check limits what can be
-claimed, not whether the sentence is good, and it only knows the spoiler terms in my list.
+knowledge of the show, and one with an attribute that was not in the supplied list. The check
+limits what can be claimed, not whether the sentence is good, and it only knows the spoiler terms
+in my list.
 `python src/eval_explanations.py --users-dir data/eval_users` reproduces the measurement
-(needs an `LLM_API_KEY`).
+(needs an `LLM_API_KEY`). `python src/review_explanations.py` exports sentences for a hand review
+(A useful, B generic but true, C misleading) and summarizes the labels.
 
 ## Run it
 
@@ -147,8 +137,11 @@ python src/evaluate.py --methods popularity quality minilm@center=1@knn=10@genre
 pytest
 ```
 
-Explanations need `LLM_API_KEY` (any OpenAI-compatible provider; the default is Groq's free tier). MyAnimeList lists need a free client ID in `MAL_CLIENT_ID` (environment or `.env`; a Streamlit
-secret when hosted). AniList needs no key.
+Explanations need `LLM_API_KEY` (any OpenAI-compatible provider; the default is Groq's free tier).
+MyAnimeList lists need a free client ID in `MAL_CLIENT_ID` (environment or `.env`; a Streamlit
+secret when hosted). AniList needs no key. Never commit either; `.env` is git-ignored.
+
+The tests (`pytest`) need only numpy, requests and pytest, and run in CI on every push.
 
 ## Data and privacy
 
@@ -163,3 +156,7 @@ collection, so the user sample is small on purpose.
 - [DECISIONS.md](DECISIONS.md): each design choice with its reason and cost, including the
   evaluation protocol and the success rule written before the test run.
 - `results/`: the evaluation outputs.
+
+## Licence
+
+MIT, see [LICENSE](LICENSE). Anime metadata and images belong to AniList and the rights holders.

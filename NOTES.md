@@ -3,6 +3,15 @@
 A running log of what I tried, what surprised me, and what I changed.
 Newest entries go at the top. This becomes the "What failed and what I'd change" section of the README.
 
+## 2026-11-26 (Step 11): README, explanation review kit, repo hygiene
+
+**What I did**
+- Reworked the README: result stated up front, not-affiliated line, licence, and the limits split into one point each.
+- Added `src/review_explanations.py` to export the model-written sentences to a CSV under `data/` for hand labelling (A useful, B generic but true, C misleading) and to summarize the labels by source and by how close the nearest liked title was.
+- Added an MIT licence, `.gitignore`, and a CI workflow that runs the tests and fails if `data/` or `.env` is ever tracked.
+
+**Open:** the hand review is not done yet. Its result decides whether picks with a weak resemblance (nearest liked title below 0.25) need a "loose match" label.
+
 ## 2026-11-26 (Step 10): a quality prior, tested on a second set of users
 
 **What I did**

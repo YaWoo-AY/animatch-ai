@@ -1,7 +1,19 @@
-
-data/
-__pycache__/
-*.py[cod]
+# secrets and private data: never commit
 .env
+data/
+
+# environments and caches
 .venv/
+venv/
+__pycache__/
+*.pyc
+*.py[cod]
 .pytest_cache/
+chroma_db/
+.streamlit/secrets.toml
+
+# editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
