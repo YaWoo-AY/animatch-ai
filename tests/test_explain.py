@@ -265,3 +265,60 @@ def test_a_recommendation_without_explanation_fields_degrades_to_the_template():
     assert template_sentence(it) == "Matches the overall shape of your list."
     res, err = explain_picks([bare], FACTS, SPOILERS, config=None, use_cache=False)
     assert res[0]["source"] == "template"
+
+
+WEAK_PICK = {**PICK, "because": [("Liked One", 0.2), ("Liked Two", 0.1)]}
+
+
+def test_a_weak_match_is_not_sent_to_the_model_and_gets_a_loose_match_template(monkeypatch):
+    calls = []
+    monkeypatch.setattr(explain, "call_llm", lambda m, c: calls.append(m) or "{}")
+    res, err = explain_picks([WEAK_PICK], FACTS, SPOILERS, config={"x": 1})
+    assert calls == [] and err is None
+    assert res[0]["source"] == "template" and res[0]["problems"] == ["weak match"]
+    assert res[0]["text"].startswith("A loose match") and "[[Liked One]]" in res[0]["text"]
+    assert check(res[0]["text"], item_facts(WEAK_PICK, FACTS), FACTS, SPOILERS) == []
+
+
+def test_only_strong_picks_are_sent_when_strong_and_weak_are_mixed(monkeypatch):
+    sent = []
+
+    def fake(messages, config):
+        sent.append(messages[1]["content"])
+        return '{"10": "Shares {{School}} with [[Liked One]]."}'
+    monkeypatch.setattr(explain, "call_llm", fake)
+    other = {**WEAK_PICK, "anilist_id": 3, "because": [("Liked One", 0.1)], "because_franchises": [1]}
+    res, _ = explain_picks([PICK, other], FACTS, SPOILERS, config={"x": 1})
+    assert len(sent) == 1 and '"id": 3' not in sent[0]
+    assert [r["source"] for r in res] == ["model", "template"]
+
+
+def test_a_missing_similarity_is_not_treated_as_weak():
+    assert item_facts({"anilist_id": 10}, FACTS)["weak"] is False
+    assert item_facts(PICK, FACTS)["weak"] is False
+
+
+def test_mood_and_quality_words_are_rejected_unless_they_are_attributes():
+    base = "Shares {{School}} with [[Liked One]]"
+    assert check(base + ".", item(), FACTS, SPOILERS) == []
+    problems = check(base + " through a dark, gritty tone.", item(), FACTS, SPOILERS)
+    assert any("dark" in p for p in problems) and any("gritty" in p for p in problems)
+    facts = Facts(RECORDS + [rec(11, 11, "Dark Pick", ["Drama"], ["Dark Fantasy"])])
+    it = item_facts({"anilist_id": 11, "because": [("Liked One", 0.5)], "because_franchises": [1]}, facts)
+    assert check("A dark take on {{Drama}} like [[Liked One]].", it, facts, SPOILERS) == []
+
+
+def test_a_mood_word_inside_a_marked_title_is_not_flagged():
+    records = RECORDS + [rec(4, 4, "Epic Journey", ["Drama"], ["School"])]
+    facts = Facts(records)
+    pick = {"anilist_id": 10, "because": [("Epic Journey", 0.5)], "because_franchises": [4]}
+    assert check("Shares {{School}} with [[Epic Journey]].", item_facts(pick, facts), facts, SPOILERS) == []
+
+
+def test_tally_leaves_weak_matches_out_of_the_pass_rate():
+    import eval_explanations
+    ok = {"source": "model", "problems": []}
+    weak = {"source": "template", "problems": ["weak match"]}
+    t = eval_explanations.tally([([ok, weak, weak], None)])
+    assert t["weak_matches_not_sent"] == 2 and t["picks_in_ok_calls"] == 1 and t["pass_rate"] == 1.0
+    assert t["failure_reasons"] == {}

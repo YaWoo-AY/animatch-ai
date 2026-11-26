@@ -31,11 +31,12 @@ def tally(batches):
     """
     ok = [results for results, error in batches if not error]
     errors = Counter(error for _, error in batches if error)
-    picks = sum(len(r) for r in ok)
+    weak = sum(1 for r in ok for x in r if x["problems"] == ["weak match"])
+    picks = sum(len(r) for r in ok) - weak
     passed = sum(1 for r in ok for x in r if x["source"] == "model")
-    reasons = Counter(p.split(":")[0] for r in ok for x in r for p in x["problems"])
+    reasons = Counter(p.split(":")[0] for r in ok for x in r for p in x["problems"] if p != "weak match")
     return {"calls": len(batches), "calls_ok": len(ok), "call_errors": dict(errors),
-            "picks_in_ok_calls": picks, "passed_check": passed,
+            "weak_matches_not_sent": weak, "picks_in_ok_calls": picks, "passed_check": passed,
             "pass_rate": round(passed / picks, 3) if picks else None, "failure_reasons": dict(reasons)}
 
 

@@ -2,12 +2,14 @@
  "calls": 10,
  "calls_ok": 10,
  "call_errors": {},
- "picks_in_ok_calls": 100,
- "passed_check": 98,
- "pass_rate": 0.98,
+ "weak_matches_not_sent": 34,
+ "picks_in_ok_calls": 66,
+ "passed_check": 51,
+ "pass_rate": 0.773,
  "failure_reasons": {
-  "spoiler term": 1,
-  "attribute not in the facts": 1
+  "mood or quality word not in the facts": 12,
+  "another title mentioned": 3,
+  "spoiler term": 1
  },
  "model": "openai/gpt-oss-120b",
  "users": 10,

@@ -25,6 +25,14 @@ DEFAULT_BASE_URL = "https://api.groq.com/openai/v1"
 DEFAULT_MODEL = "openai/gpt-oss-120b"
 MAX_WORDS = 40
 MAX_SHARED = 4
+WEAK_MATCH = 0.25      # below this similarity to the closest liked title, no model sentence is written
+# Mood, style and quality words the model cannot know from the facts it was given.
+UNSUPPORTED_WORDS = {
+    "dark", "gritty", "grim", "bleak", "stylized", "stylised", "stylish", "psychological", "intense",
+    "epic", "deep", "rich", "mature", "complex", "emotional", "heartwarming", "heartfelt", "gripping",
+    "thrilling", "fresh", "comfort", "comforting", "cozy", "wholesome", "atmospheric", "cgi", "energy",
+    "grand", "beautiful", "stunning", "hilarious", "dialogue",
+}
 CACHE_LIMIT = 5000
 _cache = {}
 
@@ -110,19 +118,26 @@ def item_facts(rec, facts):
         shared = [a for a in pick_attrs if a in set(_attrs(lr))]
         shared.sort(key=lambda a: facts.freq[a])            # rarer attributes say more
         liked.append({"title": lr["title"], "shared": shared[:MAX_SHARED]})
+    sims = [s for _, s in rec.get("because", [])]
+    similarity = max(sims) if sims else None
     return {"id": pick["anilist_id"], "title": pick["title"], "format": pick["format"], "year": pick["year"],
-            "episodes": pick["episodes"], "attributes": pick_attrs, "liked": liked}
+            "episodes": pick["episodes"], "attributes": pick_attrs, "liked": liked,
+            "similarity": similarity, "weak": similarity is not None and similarity < WEAK_MATCH}
 
 
 # ---------------------------------------------------------------- template (always safe)
 
 def template_sentence(item):
-    """A plain sentence from the same facts. Used whenever the model cannot be used or fails the check."""
+    """A plain sentence from the same facts. Used for weak matches and whenever the model cannot be
+    used or fails the check."""
+    lead = "A loose match: shares " if item.get("weak") else "Shares "
     for lk in item["liked"]:
         if lk["shared"]:
             tags = " and ".join("{{" + a + "}}" for a in lk["shared"][:2])
-            return f"Shares {tags} with [[{lk['title']}]]."
+            return f"{lead}{tags} with [[{lk['title']}]]."
     if item["liked"]:
+        if item.get("weak"):
+            return f"A loose match to [[{item['liked'][0]['title']}]]."
         return f"Close to [[{item['liked'][0]['title']}]] in overall feel."
     return "Matches the overall shape of your list."
 
@@ -174,6 +189,9 @@ def check(sentence, item, facts, spoiler_terms):
     for num in re.findall(r"\d+", unmarked):
         if num not in allowed_numbers:
             problems.append(f"number not in the facts: {num}")
+    allowed_words = set(re.findall(r"[a-z]+", " ".join(item["attributes"]).lower()))
+    for word in sorted(set(re.findall(r"[a-z]+", stripped.lower())) & UNSUPPORTED_WORDS - allowed_words):
+        problems.append(f"mood or quality word not in the facts: {word}")
     return problems
 
 
@@ -190,8 +208,10 @@ SYSTEM = (
     "facts given. Rules: (1) at most 25 words; (2) name one or two of the item's liked titles exactly as "
     "given, inside [[double brackets]]; (3) mention at least one genre or tag, chosen only from the item's "
     "'attributes' list and preferably from the 'shared' list of a liked title, inside {{braces}}, spelled "
-    "exactly as given; (4) do not describe the plot, characters, setting or ending, and do not use any "
-    "number; (5) no other titles. Reply with one JSON object mapping each item id (as a string) to its "
+    "exactly as given; (4) do not describe the plot, characters, setting or ending, do not use any "
+    "number, and do not use mood, style or quality words (such as dark, epic, deep, stylized, emotional) "
+    "unless they are in the attributes; (5) no other titles; (6) attribute a genre or tag only to a liked "
+    "title whose 'shared' list contains it. Reply with one JSON object mapping each item id (as a string) to its "
     "sentence, and nothing else."
 )
 
@@ -272,17 +292,23 @@ def explain_picks(recs, facts, spoiler_terms, config=None, use_cache=True):
             todo.append(i)
     error = None
     replies = {}
-    if todo and config:
+    ask = [i for i in todo if not items[i]["weak"]]
+    if ask and config:
         try:
-            replies = parse_reply(call_llm(build_messages([items[i] for i in todo]), config))
+            replies = parse_reply(call_llm(build_messages([items[i] for i in ask]), config))
             if not replies:
                 error = "reply was not valid JSON"
         except LLMError as e:
             error = str(e)
-    elif todo:
+    elif ask:
         error = "no model configured"
     for i in todo:
         item = items[i]
+        if item["weak"]:
+            results[i] = {"text": template_sentence(item), "source": "template", "problems": ["weak match"]}
+            if use_cache and error is None:
+                _cache[keys[i]] = results[i]
+            continue
         sentence = replies.get(str(item["id"]))
         problems = check(sentence, item, facts, spoiler_terms) if sentence is not None else ["no sentence returned"]
         if sentence is not None and not problems:

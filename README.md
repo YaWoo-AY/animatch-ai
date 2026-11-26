@@ -1,6 +1,6 @@
 # AniMatch AI
 
-A spoiler-free anime recommender. Give it your public AniList or MyAnimeList username and it
+A spoiler free anime recommender. Give it your public AniList or MyAnimeList username and it
 suggests shows you have not seen, with the titles you liked that led to each pick.
 
 **Live demo:** [https://animatch-ai.streamlit.app/]
@@ -16,17 +16,30 @@ Not affiliated with AniList or MyAnimeList. A personal project, not a product.
 ## What it does
 
 - Reads a public watchlist from AniList or MyAnimeList (official API, no login).
-- Builds a taste profile from ratings, falling back to completed, watching and dropped status for the many titles people never rate. Unrated titles count, but with a cap, so hundreds of them cannot outvote a few deliberate high ratings.
-- Hides everything you have already seen, counting a whole franchise as seen (all seasons, movies and OVAs), plus other versions of the same story.
-- Ranks the rest by taste and shows each pick at its first entry, with the liked titles that explain it.
-- Optionally writes one short sentence per pick with a language model, checked against the facts it was given (below).
-- Shows no synopsis and no spoiler-flagged tags. Filters: episode count, release year, community score.
+- Builds a taste profile from ratings, falling back to completed, watching and dropped status for
+  the many titles people never rate. Unrated titles count, but with a cap, so hundreds of them
+  cannot outvote a few deliberate high ratings.
+- Hides everything you have already seen, counting a whole franchise as seen (all seasons, movies
+  and OVAs), plus other versions of the same story.
+- Ranks the rest by taste and shows each pick at its first entry, with the liked titles that
+  explain it.
+- Optionally writes one short sentence per pick with a language model, checked against the facts
+  it was given (below).
+- Shows no synopsis and no spoilerflagged tags. Filters: episode count, release year, community
+  score.
 
 ## How it works
 
-1. **Data.** The 5,000 most popular anime on AniList (TV, movie, ONA, OVA; adult titles excluded). 4,869 have a synopsis and a release, and are grouped into 3,013 franchises from AniList's relation links.
-2. **Vectors.** Each title is embedded (all-MiniLM-L6-v2) from its genres, non-spoiler tags and synopsis, and stored in ChromaDB. A second representation is an IDF-weighted genre and tag vector.
-3. **Taste and scoring.** The method that ships is `minilm@center=1@knn=10@genre=1@pop=0.5@qual=2`: embeddings with the shared "typical anime" component removed, scored against the 10 nearest liked franchises, fused with the tag score, plus a popularity prior and a community-score prior. Both weights are sliders on the page.
+1. **Data.** The 5,000 most popular anime on AniList (TV, movie, ONA, OVA; adult titles excluded).
+   4,869 have a synopsis and a release, and are grouped into 3,013 franchises from AniList's
+   relation links.
+2. **Vectors.** Each title is embedded (all-MiniLM-L6-v2) from its genres, non spoiler tags and
+   synopsis, and stored in ChromaDB. A second representation is an IDF weighted genre and tag
+   vector.
+3. **Taste and scoring.** The method that ships is `minilm@center=1@knn=10@genre=1@pop=0.5@qual=2`:
+   embeddings with the shared "typical anime" component removed, scored against the 10 nearest
+   liked franchises, fused with the tag score, plus a popularity prior and a community score prior.
+   Both weights are sliders on the page.
 4. **Deeper cuts.** A toggle shows a second list with the most popular franchises left out.
 
 ## How I evaluated it
@@ -55,7 +68,7 @@ clearly different with the top 300 removed (+4.0 pts, interval -0.3 to +8.5), an
 on the full catalog (-1.9 pts, interval -9.1 to +5.2; 13.3% against 15.2% for popularity). The same
 configuration was clearly worse than popularity on the full catalog on the third set of users.
 
-**Round 2** (third set of users): I added a community-score term (my own list had shown low-scored
+**Round 2** (third set of users): I added a community score term (my own list had shown low scored
 picks), tuned its weight on the development users and committed the choice and the rule. Recall@10:
 
 | View | Popularity | Community score alone | Round 1 configuration | Current (with quality term) |
@@ -72,46 +85,67 @@ a tie on the full catalog (+0.0 pts [-4.2, +3.8]) and clearly better with the to
 two of the three views.
 
 **What I learned**
-- Text embeddings compared directly were about as good as random until I centered the vectors, and worse than random once popular titles were removed. Centering, a popularity prior and a quality prior mattered more than the choice of embedding model.
-- Scoring by the nearest few liked titles looked best on one setting of K and poor on others. I did not trust the best of a dozen settings, and picked the configuration that held up in both tail views instead.
-- The genre/tag vector alone was better than popularity when the 1,000 most popular titles were removed and clearly worse on the full catalog.
-- Community score alone is a strong baseline once the very popular titles are removed: with the top 1,000 removed it did as well as my first configuration.
-- Retellings slipped through as "unseen": a 2012 OVA of a story I had just watched was recommended first, because AniList links them only as `ALTERNATIVE`. They are now hidden, which the evaluation above did not include.
+- Text embeddings compared directly were about as good as random until I centered the vectors, and
+  worse than random once popular titles were removed. Centering, a popularity prior and a quality prior
+  mattered more than the choice of embedding model.
+- Scoring by the nearest few liked titles looked best on one setting of K and poor on others. I did
+  not trust the best of a dozen settings, and picked the configuration that held up in both tail
+  views instead.
+- The genre/tag vector alone was better than popularity when the 1,000 most popular titles were
+  removed and clearly worse on the full catalog.
+- Community score alone is a strong baseline once the very popular titles are removed: with the top
+  1,000 removed it did as well as my first configuration.
+- Retellings slipped through as "unseen": a 2012 OVA of a story I had just watched was recommended
+  first, because AniList links them only as `ALTERNATIVE`. They are now hidden, which the evaluation
+  above did not include.
 
 ## Limits
 
 - The test measures finding things you already watched and loved, not whether a new recommendation
-  would be enjoyed. It favors popular and well-reviewed titles. It is a proxy for comparing versions.
+  would be enjoyed. It favors popular and well reviewed titles. It is a proxy for comparing versions.
 - 25 users sampled from an activity feed favor people who update often. The tail views rest on a few
   hundred hidden titles, and some users contribute one or two.
-- The community-score term is rewarded by how the test is built: the hidden title is one the user rated
+- The community score term is rewarded by how the test is built: the hidden title is one the user rated
   highly, and community score predicts personal ratings. The test does not show that the picks are more
-  enjoyable or more novel. With the quality weight at 0, low-scored titles can appear.
+  enjoyable or more novel. With the quality weight at 0, low scored titles can appear.
 - Only the top 5,000 titles, no shorts or specials, and no adult titles. About 8% of my own list's
   entries were not in the index.
 - Related titles linked only as `OTHER`, and TV side stories, count as separate franchises, so a
   sequel can be recommended to someone who liked the first series.
-- The optional one-sentence explanations are checked for what they name, not for tone or
-  usefulness, and a spoiler that is not in my spoiler-tag list would pass.
+- The optional one sentence explanations are checked for what they name, not for tone or
+  usefulness, and a spoiler that is not in my spoiler tag list would pass.
 - Explanations go through a free hosted model with rate limits, so the hosted page sometimes falls
   back to a plain template sentence.
-- Picks with only a weak resemblance to anything you liked still get a sentence, which can make the
-  link sound stronger than it is.
+- Explanation sentences were reviewed by hand once, by me, on 24 sentences. Two rules came out of
+  that review (below) and were tuned on the same sentences, so they are untested on new ones.
 
 ## Explanations
 
 Each pick can get one sentence saying why it fits, written by a language model. The model is given
 only the pick's genres and tags and the ones it shares with your liked titles, never a synopsis or
-a spoiler-flagged tag, and must mark every title and attribute it uses so code can check them.
+a spoiler flagged tag, and must mark every title and attribute it uses so code can check them.
 A sentence that names a title or attribute that was not supplied, mentions another title, includes
-a spoiler-flagged tag or uses a stray number is thrown away and replaced by a plain template built
+a spoiler flagged tag or uses a stray number is thrown away and replaced by a plain template built
 from the same facts. Nothing unchecked is shown.
 
-On 10 development users (100 picks), 98 sentences passed the check on the final run. The two that
-failed were a sentence containing a spoiler-flagged term, which the model produced from its own
-knowledge of the show, and one with an attribute that was not in the supplied list. The check
-limits what can be claimed, not whether the sentence is good, and it only knows the spoiler terms
-in my list.
+On 10 development users (100 picks) with the current rules: 34 picks were weak matches and got the
+plain template without a model call; of the 66 sent to the model, 51 sentences passed the check
+(77%) and 15 were replaced by the template. Reasons for replacement (one sentence can have more than
+one): 12 mood or quality words not in the facts, 3 another catalog title, 1 spoiler-flagged term.
+So 51 of 100 shown sentences are model written and the other 49 are templates. An earlier version
+without the mood word rule and the weak match rule passed 98 of 100, but that figure is not
+comparable: it counted weak matches too and let through the sentences the review below found
+misleading. The check limits what can be claimed, not whether the sentence is good, and it only
+knows the spoiler terms in my list.
+
+I also read 24 of the sentences myself and labelled each as useful, generic or misleading. 8 were
+misleading, and 6 of those 8 were for picks whose closest liked title was only a weak match
+(similarity below 0.25), where the model tended to invent a stronger link. So those picks now get a
+plain template ("A loose match: shares ... with ...") with no model call, and a short list of mood
+and style words that the model cannot know ("dark", "epic", "stylized") is rejected unless it is one
+of the pick's own tags. I set both rules after reading those 24 sentences, so they have not yet been
+tested on new ones.
+
 `python src/eval_explanations.py --users-dir data/eval_users` reproduces the measurement
 (needs an `LLM_API_KEY`). `python src/review_explanations.py` exports sentences for a hand review
 (A useful, B generic but true, C misleading) and summarizes the labels.
@@ -137,7 +171,7 @@ python src/evaluate.py --methods popularity quality minilm@center=1@knn=10@genre
 pytest
 ```
 
-Explanations need `LLM_API_KEY` (any OpenAI-compatible provider; the default is Groq's free tier).
+Explanations need `LLM_API_KEY` (any OpenAI compatible provider; the default is Groq's free tier).
 MyAnimeList lists need a free client ID in `MAL_CLIENT_ID` (environment or `.env`; a Streamlit
 secret when hosted). AniList needs no key. Never commit either; `.env` is git-ignored.
 

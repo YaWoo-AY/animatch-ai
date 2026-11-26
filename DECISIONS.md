@@ -16,12 +16,12 @@ When a decision changes, edit it in place and add the date.
 
 **Crawl is resumable.**
 - Raw records go to `data/raw_anime.jsonl` one per line, progress to `data/crawl_state.json`. Duplicate AniList IDs are dropped when building the clean file.
-- Re-running `python src/fetch_anilist.py --pages 100` re-cleans from the saved raw file with no network calls, so cleaning changes never need a recrawl.
+- Re running `python src/fetch_anilist.py --pages 100` re cleans from the saved raw file with no network calls, so cleaning changes never need a recrawl.
 
 ## Identifiers
 
 **Key everything on the AniList ID; map to MyAnimeList's `idMal` when present.**
-- 16 of 5,000 titles have no `idMal`, so a MAL-only key would break exclusion for them.
+- 16 of 5,000 titles have no `idMal`, so a MAL only key would break exclusion for them.
 - MAL watchlist imports match on `idMal`; AniList imports match on the AniList ID.
 
 ## Text cleaning and spoilers
@@ -30,8 +30,8 @@ When a decision changes, edit it in place and add the date.
 - Credit lines like "(Source: Crunchyroll)" are noise for embeddings and should not be quoted by the LLM.
 
 **Two tag fields: `tags` (safe to show) and `spoiler_tags` (retrieval only).**
-- `tags`: non-spoiler tags ranked 60 or higher.
-- `spoiler_tags`: spoiler-flagged tags ranked 60 or higher.
+- `tags`: non spoiler tags ranked 60 or higher.
+- `spoiler_tags`: spoiler flagged tags ranked 60 or higher.
 - Why two: AniList flags many of the best tags as spoilers (Summer Time Rendering: Survival 100, Time Manipulation 97, Time Loop 95). Dropping them left only weak themes (Coastal, Rural, Shounen) and hurt retrieval.
 - **Rule: spoiler tags must never be shown to a user or included in the prompt of the LLM that writes pitches.** Pitch generation reads `tags` and the premise from `anime.json`, never Chroma's stored text. The stored text in the `spoilers` and `notitle_spoilers` collections contains spoiler tags, so those collections are for retrieval only.
 
@@ -40,7 +40,7 @@ When a decision changes, edit it in place and add the date.
 **Two models, compared: all-MiniLM-L6-v2 and bge-small-en-v1.5.**
 - Each model has its own ChromaDB collection, cosine distance, normalized vectors.
 - BGE uses the query prefix "Represent this sentence for searching relevant passages: ". MiniLM uses none.
-- Distances are not comparable across models (BGE roughly 0.29-0.32 and MiniLM 0.54-0.61 for similar-quality matches). Never share one distance cutoff between models, and never read a small gap between BGE distances as meaningful (several top results tie at 0.399-0.400).
+- Distances are not comparable across models (BGE roughly 0.29-0.32 and MiniLM 0.54-0.61 for similar quality matches). Never share one distance cutoff between models, and never read a small gap between BGE distances as meaningful (several top results tie at 0.399-0.400).
 
 **Embedding text structure: title (optional), genres, themes, optional plot elements, then synopsis.**
 - Why this order: if a model truncates a long input it cuts the end of the synopsis, never the genres and themes. MiniLM truncates 6.5-8.8% of texts (limit 256 tokens); BGE 0.1% (limit 512).
@@ -61,8 +61,8 @@ When a decision changes, edit it in place and add the date.
 - Cost of dropping the title: name lookups and titles that are the best clue (7th Time Loop) fall out. Plan: BM25 over titles alongside the dense search.
 - Collections are always rebuilt from scratch so they match `anime.json`.
 
-**Free-text search is a secondary feature; profile-based search is the main path.**
-- Small embedding models match topic words, not plot mechanics ("a student keeps waking up on the same morning" returns school shows). Item-to-item neighbours from a real title are much more sensible.
+**Free text search is a secondary feature; profile based search is the main path.**
+- Small embedding models match topic words, not plot mechanics ("a student keeps waking up on the same morning" returns school shows). Item to item neighbours from a real title are much more sensible.
 - "Like X" queries use X's own vector as the seed and exclude X's franchise. They are not treated as free text.
 - "Shorter", "newer" and similar constraints go through filters (episode cap, year), not the query text.
 - Stretch: an LLM rewrites a described plot into tag vocabulary ("relives the same day" becomes "time loop") before searching.
@@ -109,13 +109,13 @@ Used to exclude a whole franchise once the user has watched part of it (no recom
 **AniList is the primary source, the official MyAnimeList API is the second.**
 - Why AniList first: GraphQL, no key needed, one query returns the whole list including custom lists, and the crawl already uses AniList ids.
 - Why the official MAL API: a free client ID is enough to read a public list (checked with a real request). It is a supported product, not a scraper.
-- Cost: MAL needs a client ID, kept in `MAL_CLIENT_ID` or the git-ignored `.env`. Private lists cannot be read from either platform.
+- Cost: MAL needs a client ID, kept in `MAL_CLIENT_ID` or the git ignored `.env`. Private lists cannot be read from either platform.
 
 **Not using Jikan or its replacements.**
 - The Jikan public API was discontinued on 1 October 2026.
 - Tenrai covers the catalogue only; its docs say to use the official MAL API for user data.
-- Jikan-Edge is a single-developer scraper on Cloudflare Workers, and I never confirmed its list endpoint. Self-hosting Jikan needs MongoDB and a server for a feature the official API already provides, and it still scrapes MAL.
-- Rule I took from this: a project that depends on a free third-party scraper can break without warning. Prefer official APIs for anything the demo needs.
+- Jikan Edge is a single developer scraper on Cloudflare Workers, and I never confirmed its list endpoint. Self hosting Jikan needs MongoDB and a server for a feature the official API already provides, and it still scrapes MAL.
+- Rule I took from this: a project that depends on a free third party scraper can break without warning. Prefer official APIs for anything the demo needs.
 
 **One standard entry format, one fetcher per platform.**
 - `{anilist_id, mal_id, status, score, progress}`; adding a platform means one new function and one line in `FETCHERS`.
@@ -124,7 +124,7 @@ Used to exclude a whole franchise once the user has watched part of it (no recom
 - 79% of my own entries are unrated, so unrated completed titles must still count, as a weaker positive signal than a high rating. Designed in Step 6.
 
 **Cache profiles for 24 hours.**
-- Protects the rate limits and makes reruns instant. `--refresh` forces a fetch. The cache is in `data/cache/`, which is git-ignored.
+- Protects the rate limits and makes reruns instant. `--refresh` forces a fetch. The cache is in `data/cache/`, which is git ignored.
 
 **Titles not in the index are ignored for recommendations.**
 - They cannot be recommended and cannot block their franchise from being suggested. Measured on a real list: 8% of entries, but 62% of those are shorts and specials excluded on purpose, so the real gap is about 2%.
@@ -134,7 +134,7 @@ Used to exclude a whole franchise once the user has watched part of it (no recom
 
 - **Weights per entry:** rated 8 to 10 gives (score - 5) / 5; 6 to 7.9 gives 0; 5 or lower is negative. With no score: completed +0.3, watching +0.15, dropped -0.6 (or -0.25 once more than half the episodes were watched), paused and planning 0. A score always beats the status.
 - **Vector:** unit(positive centroid) minus alpha times unit(negative centroid), alpha 0.3, then normalised. Alpha and the share cap are guesses to be tuned with the harness.
-- **Seen means whole franchises.** Completed, watching, paused and dropped hide the franchise. Plan-to-watch does not, because it is a candidate the user already likes the look of.
+- **Seen means whole franchises.** Completed, watching, paused and dropped hide the franchise. Plan to watch does not, because it is a candidate the user already likes the look of.
 - **Unrated titles count, weakly, with a cap.** Many people rate a fifth of their list. Without a cap, hundreds of unrated completed titles would outvote a few dozen deliberate high ratings. Share capped at 35%; this is a starting value, to be tuned.
 - **One vote per franchise.** Five seasons are one observation.
 - **Recommend the franchise's first entry,** not the season nearest the taste vector, unless that entry breaks the user's filters.
@@ -142,17 +142,17 @@ Used to exclude a whole franchise once the user has watched part of it (no recom
 
 ## Evaluation protocol (Step 7)
 
-- **Leave-one-out on whole franchises.** Hide a franchise rated 8 or higher, build from the rest, rank the hidden franchise among all unseen franchises. Averaged per user, with intervals from resampling users, so a user with 1,000 liked titles cannot dominate.
+- **Leave one out on whole franchises.** Hide a franchise rated 8 or higher, build from the rest, rank the hidden franchise among all unseen franchises. Averaged per user, with intervals from resampling users, so a user with 1,000 liked titles cannot dominate.
 - **Method options in `evaluate.py`** (after `@`, combinable): `alpha` weight of the dislike vector; `share` largest share of liked weight that unrated titles may carry (0 ignores them, 1 removes the cap); `center` 1 subtracts the index's average vector first; `qual` w adds w times the standardised community score (unknown = median); `knn` K scores a title by its K nearest liked franchises instead of their average; `pop` w adds w times standardised log popularity to the standardised similarity; `genre` w also scores with the genre/tag representation and adds w times its standardised score. Index variants are written `minilm/notitle` and so on.
 - **Two views, both reported.** All franchises, and with the 300 or 1,000 most popular removed. The first rewards recommending what everyone watches (popularity alone gets 19.7%); the second asks whether the system finds less obvious titles. I decided to report both before seeing the second.
 - **Dev set and test set.** 25 users to compare methods on, 25 different users reserved for one final run. Tuning on the test set is not allowed. If I change the configuration after looking at the test results, the test set is spent and a new one must be sampled.
-- **Users are anonymous and local.** Ids, statuses and scores only, in the git-ignored `data/`. AniList's terms forbid mass collection, so the sets stay small.
+- **Users are anonymous and local.** Ids, statuses and scores only, in the git ignored `data/`. AniList's terms forbid mass collection, so the sets stay small.
 - **Chosen after the dev runs, before the test run:** `minilm@center=1@knn=10@genre=1@pop=0.5` (centered MiniLM vectors, scored against the 10 nearest liked franchises, fused with the genre/tag score at equal weight, plus a 0.5 popularity prior). Reason: it is the only configuration that was clearly better than popularity at Recall@10 in both tail views (+6.3 points with the top 1000 removed, +2.7 with the top 300 removed), with similar absolute values (7.5% and 7.3%). Settings that did better in one view (K=5 at 8.1%) did worse in the other and moved a lot with K, which looks like noise. Picking the best of a dozen settings on 25 users also overstates its real strength.
 - **Decision rule, written before the test run:**
   - Success: the paired difference to popularity at Recall@10 has a lower bound above zero in both tail views on the test set.
   - Partial: clearly better in one tail view only.
   - Failure: neither. Then the README says so and the configuration is not described as an improvement.
-  - The all-franchises view is reported whatever it shows. I expect popularity to stay ahead there.
+  - The all franchises view is reported whatever it shows. I expect popularity to stay ahead there.
 - **Test commands (run once each):** `--users-dir data/test_users` with `--tail 1000`, `--tail 300` and no tail, and the methods `popularity genre minilm minilm@center=1@knn=10@genre=1@pop=0.5`.
 
 ### Test-set result (run once, 2026-11-24)
@@ -165,7 +165,7 @@ Configuration `minilm@center=1@knn=10@genre=1@pop=0.5`, 25 test users, Recall@10
 | Top 300 removed (370 hidden, 24 users) | 3.7% | 7.7% | +4.0 pts [-0.3, +8.5] | not clearly different |
 | All franchises (487 hidden, 25 users) | 15.2% | 13.3% | -1.9 pts [-9.1, +5.2] | not clearly different |
 
-By the rule written beforehand, this is **partial**: clearly better in one tail view, not in the other. I do not describe the configuration as an improvement over popularity in general. The point estimate is positive in both tail views and the top-300 interval only just includes zero, but I do not round that up. The genre/tag score alone was clearly better than popularity with the top 1000 removed (+6.3 pts), not clearly different with the top 300 removed, and clearly worse on all franchises (-8.9 pts).
+By the rule written beforehand, this is **partial**: clearly better in one tail view, not in the other. I do not describe the configuration as an improvement over popularity in general. The point estimate is positive in both tail views and the top 300 interval only just includes zero, but I do not round that up. The genre/tag score alone was clearly better than popularity with the top 1000 removed (+6.3 pts), not clearly different with the top 300 removed, and clearly worse on all franchises (-8.9 pts).
 
 What I take from it:
 - The configuration finds less popular titles better than popularity does, and on this sample it is not clearly worse than popularity overall. It is not shown to be better where most real watching happens.
@@ -175,39 +175,48 @@ What I take from it:
 ## Live recommender
 
 - **One scoring code path.** `scoring.py` holds the method parser, the scorer and the catalog arrays. `evaluate.py` and `recommend.py` both import it, so what was measured is what runs. A test checks that the live ranking equals the scorer's ranking.
-- **Default: `minilm@center=1@knn=10@genre=1@pop=0.5@qual=2`,** the earlier configuration plus the community-score prior (see the quality prior sections). It was chosen on the dev users and confirmed once on new users. The popularity and quality weights are flags (`--pop`, `--qual`), because the right amount depends on what the user wants from the list.
+- **Default: `minilm@center=1@knn=10@genre=1@pop=0.5@qual=2`,** the earlier configuration plus the community score prior (see the quality prior sections). It was chosen on the dev users and confirmed once on new users. The popularity and quality weights are flags (`--pop`, `--qual`), because the right amount depends on what the user wants from the list.
 - **Deeper cuts:** `--skip-popular N` removes the N most popular franchises, the same view the evaluation used in its tail runs. Whether the app shows one list or two ("popular picks" and "deeper cuts") is still open.
-- **Retrieval no longer goes through ChromaDB queries.** Scoring needs every franchise (the tag score and the nearest-liked score are computed over all of them), so vectors are read from ChromaDB once and scored with numpy. At about 3,000 franchises this is fast; it would need revisiting for a catalog many times larger.
-- **Retellings are hidden, not merged.** AniList's `ALTERNATIVE` links (Horimiya and the 2012 Hori-san to Miyamura-kun OVA) hide a franchise when its counterpart has been seen, so you are not sent to another telling of a story you know. They are never used to merge franchises, because `ALTERNATIVE` also covers loosely related versions, and the cost of over-hiding falls on titles that might be new. `--keep-retellings` switches it off. This rule is not in the evaluation, which was run without it.
+- **Retrieval no longer goes through ChromaDB queries.** Scoring needs every franchise (the tag score and the nearest liked score are computed over all of them), so vectors are read from ChromaDB once and scored with numpy. At about 3,000 franchises this is fast; it would need revisiting for a catalog many times larger.
+- **Retellings are hidden, not merged.** AniList's `ALTERNATIVE` links (Horimiya and the 2012 Hori san to Miyamura kun OVA) hide a franchise when its counterpart has been seen, so you are not sent to another telling of a story you know. They are never used to merge franchises, because `ALTERNATIVE` also covers loosely related versions, and the cost of over hiding falls on titles that might be new. `--keep-retellings` switches it off. This rule is not in the evaluation, which was run without it.
 - **Known gaps, left as they are:** `OTHER` links are never followed (Cyberpunk: Edgerunners 2 is linked to the first series only as `OTHER`, so it can be recommended to someone who loved the first; arguably useful). A TV side story attached by `PARENT` stays a separate franchise (Horimiya: The Missing Pieces), as decided when grouping was written.
 - **Filters apply to the franchise's first entry,** the title that is shown, not to whichever title matched best.
 
 ## Demo page
 
 - **A thin Streamlit page (`app.py`) over `recommend.recommend`.** It holds no recommendation logic, so what the page shows is what the command line and the evaluation use.
-- **Both list styles are exposed so they can be compared by eye before one is chosen:** a popularity-weight slider, and a "deeper cuts" toggle that shows a second list with the most popular franchises left out, side by side.
-- **Spoiler-free:** the page shows title, year, format, episode count, community score, cover and the titles that explain the pick. No synopsis.
+- **Both list styles are exposed so they can be compared by eye before one is chosen:** a popularity weight slider, and a "deeper cuts" toggle that shows a second list with the most popular franchises left out, side by side.
+- **Spoiler free:** the page shows title, year, format, episode count, community score, cover and the titles that explain the pick. No synopsis.
 - **Privacy:** the watchlist is cached briefly (an hour in memory, 24 hours on disk by the parser) and nothing is logged. A hosted version would need this stated on the page and a decision on whether the disk cache is kept.
 
 ## Explanations (language model, checked)
 
-- **What the model sees:** the pick's title, format, year, episode count, its visible genres and non-spoiler tags, and for each liked title that led to the pick, the title and the attributes it shares. **Not** the synopsis, **not** spoiler-flagged tags (the rule from the text-cleaning section). A test asserts the prompt contains neither.
+- **What the model sees:** the pick's title, format, year, episode count, its visible genres and non spoiler tags, and for each liked title that led to the pick, the title and the attributes it shares. **Not** the synopsis, **not** spoiler flagged tags (the rule from the text cleaning section). A test asserts the prompt contains neither.
 - **Why attributes, not plot:** claims about genres and tags can be checked mechanically; claims about plot cannot, and are where spoilers live. The cost is blander sentences.
-- **Machine-checkable format:** titles in `[[double brackets]]`, genres and tags in `{{braces}}`. Every sentence is checked: it names a liked title from the supplied facts, cites at least one attribute from the pick's list, mentions no other catalog title, contains no spoiler-flagged tag of that pick (unless it is also a visible tag), uses no number except the year and episode count, and stays under 40 words.
+- **Machine checkable format:** titles in `[[double brackets]]`, genres and tags in `{{braces}}`. Every sentence is checked: it names a liked title from the supplied facts, cites at least one attribute from the pick's list, mentions no other catalog title, contains no spoiler flagged tag of that pick (unless it is also a visible tag), uses no number except the year and episode count, and stays under 40 words.
 - **Fail closed:** a sentence that fails, a bad reply, a rate limit or a missing key all give a template built from the same facts, which itself passes the check (tested). Nothing unchecked is shown.
 - **The check does not prove the sentence is good.** It limits what the model can claim; it does not measure whether the wording is helpful. `eval_explanations.py` reports the pass rate and failure reasons, nothing about quality.
 - **Spoiler terms ship in `app_data/spoiler_tags.json`** for the check only. They are never displayed or sent to a model. If the file is missing, explanations stay off.
-- **Provider:** any OpenAI-compatible endpoint, set by `LLM_API_KEY`, `LLM_BASE_URL` and `LLM_MODEL`. Default is Groq's free tier. Free-tier limits are shared by every visitor to the hosted page, so one batched call per list is made, results are cached, and the page degrades to the template when the limit is hit.
+- **Provider:** any OpenAI compatible endpoint, set by `LLM_API_KEY`, `LLM_BASE_URL` and `LLM_MODEL`. Default is Groq's free tier. Free tier limits are shared by every visitor to the hosted page, so one batched call per list is made, results are cached, and the page degrades to the template when the limit is hit.
 - **Privacy:** the liked titles of the person using the page are sent to the model provider. The page says so next to the checkbox. Do not enable it on a hosted page without saying that.
+
+### Hand review of the sentences, and two rules that came from it (2026-11-26)
+- **Review:** I labelled 24 model sentences (3 development users) from the facts in each row: A useful and true, B true but generic, C misleading or overstated. Result: 7 A, 9 B, 8 C. Below a similarity of 0.25 to the closest liked title, 6 of 8 were C and none were A; at 0.25 or above, 2 of 16 were C. One reader, one small sample, labelled by me with the facts in front of me.
+- **What went wrong in the C sentences:** an attribute credited to a liked title that does not have it; mood or style claims that are not in the facts ("dark", "gritty", "stylized", "psychological"); confident wording on thin links.
+- **Rule 1, weak matches get the template:** below 0.25 no sentence is requested from the model; the template says "A loose match: shares ... with ...". The threshold comes from this one review. Cost: fewer model sentences, and a plain sentence where the link is weak, which is what it should say.
+- **Rule 2, mood and quality words:** a fixed list of such words is rejected unless the word is part of one of the pick's own attributes. Marked titles are exempt. Cost: it also rejects some good sentences ("epic", "complex"), and it is a list, not a general test of unsupported claims. The prompt also now tells the model not to use such words and to attribute a tag only to a liked title whose shared list contains it. The checker does not enforce the second part.
+- **In sample caveat:** I wrote the threshold and the word list after reading these 24 sentences. Replayed on them, the two rules remove all 8 C sentences and keep 6 of 24 (4 A, 2 B), which says little about new sentences. A fresh set of users, labelled again, is the real test.
+- **Measured with both rules (10 development users, 100 picks):** 34 weak matches got the template without a model call; 51 of the other 66 sentences passed; failures were 12 mood or quality words, 3 other titles, 1 spoiler term. About a third of the picks being weak matches is a finding about the list: with the popularity and quality priors on, many picks rest on those priors more than on resemblance to anything liked. Not measured: whether the 51 surviving sentences are good; that needs a fresh hand review.
+- **Not built:** checking that each attribute is used only for a liked title that has it.
 
 ### Quality prior experiment (started 2026-11-26)
 
-- **Why:** on my own list, titles with community scores in the 50s and low 60s appeared, and nothing in the score knows about quality. The option `@qual=w` adds w times the standardised community score of the franchise's best-scored title (unknown scores take the median) to the standardised score, next to the popularity prior.
-- **Caution:** the leave-one-out test asks whether a hidden favourite ranks high, not whether a recommendation is good. A quality prior might help (people rate good titles highly) or hurt (it pulls towards what is already well known). I do not know which.
+- **Why:** on my own list, titles with community scores in the 50s and low 60s appeared, and nothing in the score knows about quality. The option `@qual=w` adds w times the standardised community score of the franchise's best scored title (unknown scores take the median) to the standardised score, next to the popularity prior.
+- **Caution:** the leave one out test asks whether a hidden favourite ranks high, not whether a recommendation is good. A quality prior might help (people rate good titles highly) or hurt (it pulls towards what is already well known). I do not know which.
 - **Step 1, exploratory, on the dev users:** the default configuration against the same with `@qual=0.25`, `0.5` and `1`, in the three views. Used to pick one value, with the usual warning that picking the best of several on 25 users overstates it.
 - **Step 2, confirmatory, on a new set of 25 users** (`data/test_users2`, excluding every user already sampled): the chosen value against the current default, run once. The first test set is spent for this question.
-- **Dev results, second pass (2026-11-26).** Against the current default, Recall@10 rose with the quality weight up to about 1.5 to 2 in the all-franchises view (10.6% to 18.2%) and then fell at 3 (16.4%); in the top-300 view the best values were 1 to 2; in the top-1000 view nothing was clearly different from the default (254 hidden franchises, wide intervals). Two baselines were added: popularity alone (19.7% on all franchises) and community score alone, which scored 7.6% in the top-1000 view, the same as the default there. So with the top 1000 removed, a quality-only list does as well as the earlier configuration, and the question for that view is whether the blend adds anything beyond quality.
-- **Chosen for the confirmatory run: `minilm@center=1@knn=10@genre=1@pop=0.5@qual=2`.** Reason: best or tied-best in all three dev views among the weights that showed an interior optimum (the all-franchises view fell at 3). The weights 1.5 and 2 were indistinguishable; 2 is picked for the top-300 and top-1000 views. Picking the best of several settings on 25 users overstates it.
+- **Dev results, second pass (2026-11-26).** Against the current default, Recall@10 rose with the quality weight up to about 1.5 to 2 in the all franchises view (10.6% to 18.2%) and then fell at 3 (16.4%); in the top 300 view the best values were 1 to 2; in the top 1000 view nothing was clearly different from the default (254 hidden franchises, wide intervals). Two baselines were added: popularity alone (19.7% on all franchises) and community score alone, which scored 7.6% in the top 1000 view, the same as the default there. So with the top 1000 removed, a quality only list does as well as the earlier configuration, and the question for that view is whether the blend adds anything beyond quality.
+- **Chosen for the confirmatory run: `minilm@center=1@knn=10@genre=1@pop=0.5@qual=2`.** Reason: best or tied best in all three dev views among the weights that showed an interior optimum (the all franchises view fell at 3). The weights 1.5 and 2 were indistinguishable; 2 is picked for the top 300 and top 1000 views. Picking the best of several settings on 25 users overstates it.
 - **Comparators on the new users** (`data/test_users2`): popularity, quality alone, the current default, and the chosen configuration. Paired differences are reported against the current default (the decision), and also against popularity and against quality alone (what the result means).
 - **Rule, fixed before the confirmatory run:** adopt `@qual=2` as the live default only if the paired Recall@10 difference to the current default has a lower bound above zero in at least two of the three views and is not clearly negative in the third. If it fails, the default stays as it is and the README says so. The comparisons with popularity and with quality alone are reported whatever they show.
 
@@ -231,14 +240,14 @@ Paired Recall@10 difference of the new configuration, with 95% interval:
 
 - **By the rule written beforehand: adopted.** The lower bound is above zero in two of three views (top 300, all franchises), and the third is not clearly negative.
 - **What it means:** the blend ties popularity on the full catalog (15.8% each) and beats it clearly when the most popular titles are removed. It also beats community score alone in two views. The earlier configuration was clearly worse than popularity on the full catalog on both sets of users; adding the quality prior closed that gap.
-- **What it does not mean:** the test hides a title the user rated highly, and community score predicts personal ratings, so a quality prior is rewarded by how the test is built. It does not show that the recommendations are more enjoyable or more novel. In the top-1000 view, community score alone (11.6%) did about as well as the previous default and the interval against it includes zero.
+- **What it does not mean:** the test hides a title the user rated highly, and community score predicts personal ratings, so a quality prior is rewarded by how the test is built. It does not show that the recommendations are more enjoyable or more novel. In the top 1000 view, community score alone (11.6%) did about as well as the previous default and the interval against it includes zero.
 - The weight (2) was chosen on the dev users; these users did not take part in choosing it. They are now spent for this question, and so is any further tuning of the same weights.
 
 ## Open decisions
 
-- **Embedding choices:** MiniLM vs BGE and the index variants (title, spoilers) were compared on the dev set but could not be separated from noise while the base method was near random. Re-run on the chosen configuration once it is in the live recommender.
-- **Hybrid retrieval:** BM25 over titles and tags, cross-encoder reranker, diversity pass.
+- **Embedding choices:** MiniLM vs BGE and the index variants (title, spoilers) were compared on the dev set but could not be separated from noise while the base method was near random. Re run on the chosen configuration once it is in the live recommender.
+- **Hybrid retrieval:** BM25 over titles and tags, cross encoder reranker, diversity pass.
 - **Query rewriting by an LLM:** stretch goal.
-- **Chroma index:** commit it to the repo or rebuild at startup? Depends on repo size and cold-start time on the demo host. Decide in week 1 of deployment planning.
-- **Hidden gems and popularity:** the popularity prior is 0.5 in the chosen configuration. Whether the product shows one list or two (popular picks you have not seen, and deeper cuts for your taste) depends on the test-set results.
+- **Chroma index:** commit it to the repo or rebuild at startup? Depends on repo size and cold start time on the demo host. Decide in week 1 of deployment planning.
+- **Hidden gems and popularity:** the popularity prior is 0.5 in the chosen configuration. Whether the product shows one list or two (popular picks you have not seen, and deeper cuts for your taste) depends on the test set results.
 - **Private lists:** confirm the error replies from AniList and MAL, then make the demo message friendlier.

@@ -4,8 +4,18 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import review_explanations as rv  # noqa: E402
 from explain import Facts  # noqa: E402
-from test_explain import RECORDS, PICK  # noqa: E402
 
+def rec(aid, fid, title, genres=(), tags=()):
+    return {"anilist_id": aid, "franchise_id": fid, "title": title, "genres": list(genres), "tags": list(tags),
+            "spoiler_tags": [], "format": "TV", "year": 2020, "episodes": 12, "popularity": 100}
+
+
+RECORDS = [
+    rec(10, 10, "Pick", ["Drama", "Romance"], ["School", "Music"]),
+    rec(1, 1, "Liked One", ["Drama"], ["School"]),
+    rec(2, 2, "Liked Two", ["Action"], []),
+]
+PICK = {"anilist_id": 10, "because": [("Liked One", 0.5), ("Liked Two", 0.4)], "because_franchises": [1, 2]}
 FACTS = Facts(RECORDS)
 
 
