@@ -1,0 +1,25 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install test dependencies
+        run: pip install numpy requests pytest
+      - name: Run tests
+        run: python -m pytest -q
+      - name: Fail if private files are tracked
+        run: |
+          if git ls-files | grep -E '^(data/|\.env$)'; then
+            echo "Private files are tracked"; exit 1
+          fi
