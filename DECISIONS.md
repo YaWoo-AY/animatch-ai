@@ -189,6 +189,17 @@ What I take from it:
 - **Spoiler-free:** the page shows title, year, format, episode count, community score, cover and the titles that explain the pick. No synopsis.
 - **Privacy:** the watchlist is cached briefly (an hour in memory, 24 hours on disk by the parser) and nothing is logged. A hosted version would need this stated on the page and a decision on whether the disk cache is kept.
 
+## Explanations (language model, checked)
+
+- **What the model sees:** the pick's title, format, year, episode count, its visible genres and non-spoiler tags, and for each liked title that led to the pick, the title and the attributes it shares. **Not** the synopsis, **not** spoiler-flagged tags (the rule from the text-cleaning section). A test asserts the prompt contains neither.
+- **Why attributes, not plot:** claims about genres and tags can be checked mechanically; claims about plot cannot, and are where spoilers live. The cost is blander sentences.
+- **Machine-checkable format:** titles in `[[double brackets]]`, genres and tags in `{{braces}}`. Every sentence is checked: it names a liked title from the supplied facts, cites at least one attribute from the pick's list, mentions no other catalog title, contains no spoiler-flagged tag of that pick (unless it is also a visible tag), uses no number except the year and episode count, and stays under 40 words.
+- **Fail closed:** a sentence that fails, a bad reply, a rate limit or a missing key all give a template built from the same facts, which itself passes the check (tested). Nothing unchecked is shown.
+- **The check does not prove the sentence is good.** It limits what the model can claim; it does not measure whether the wording is helpful. `eval_explanations.py` reports the pass rate and failure reasons, nothing about quality.
+- **Spoiler terms ship in `app_data/spoiler_tags.json`** for the check only. They are never displayed or sent to a model. If the file is missing, explanations stay off.
+- **Provider:** any OpenAI-compatible endpoint, set by `LLM_API_KEY`, `LLM_BASE_URL` and `LLM_MODEL`. Default is Groq's free tier. Free-tier limits are shared by every visitor to the hosted page, so one batched call per list is made, results are cached, and the page degrades to the template when the limit is hit.
+- **Privacy:** the liked titles of the person using the page are sent to the model provider. The page says so next to the checkbox. Do not enable it on a hosted page without saying that.
+
 ## Open decisions
 
 - **Embedding choices:** MiniLM vs BGE and the index variants (title, spoilers) were compared on the dev set but could not be separated from noise while the base method was near random. Re-run on the chosen configuration once it is in the live recommender.

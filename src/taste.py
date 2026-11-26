@@ -139,8 +139,8 @@ def liked_vectors(model):
     return V, w
 
 
-def explain(taste, rec_vector, n=3):
-    """The liked franchises closest to a recommendation: [(title, similarity), ...].
+def nearest_liked(taste, rec_vector, n=3):
+    """The liked franchises closest to a recommendation: [(Observation, similarity), ...].
 
     Prefers franchises the user rated; falls back to all positives when they rated almost nothing.
     """
@@ -148,5 +148,10 @@ def explain(taste, rec_vector, n=3):
     if len(pool) < n:
         pool = taste.positives
     rec = _unit(np.asarray(rec_vector, dtype=float))
-    scored = sorted(((float(o.vector @ rec), o.title) for o in pool), reverse=True)
-    return [(title, sim) for sim, title in scored[:n]]
+    scored = sorted(((float(o.vector @ rec), o.franchise_id, o) for o in pool), key=lambda t: (-t[0], t[1]))
+    return [(o, sim) for sim, _, o in scored[:n]]
+
+
+def explain(taste, rec_vector, n=3):
+    """The liked franchises closest to a recommendation: [(title, similarity), ...]."""
+    return [(o.title, sim) for o, sim in nearest_liked(taste, rec_vector, n)]

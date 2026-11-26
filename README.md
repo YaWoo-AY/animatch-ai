@@ -3,9 +3,9 @@
 A spoiler-free anime recommender. Give it your public AniList or MyAnimeList username and it
 suggests shows you have not seen, with the titles you liked that led to each pick.
 
-**Live demo:** [https://animatch-ai.streamlit.app/]
+**Live demo:** [ADD YOUR STREAMLIT LINK HERE]
 
-![The page with the main list and a "deeper cuts" list side by side](docs/mainpage.png)
+![The page with the main list and a "deeper cuts" list side by side](docs/screenshot.png)
 
 I built it to learn how to evaluate a recommender honestly, not only to make one. The main result
 is mixed, and this page says so.
@@ -20,6 +20,7 @@ is mixed, and this page says so.
   and OVAs), plus other versions of the same story.
 - Ranks the rest by taste and shows each pick at its first entry, with the liked titles that
   explain it.
+- Optionally writes one short sentence per pick with a language model, checked against the facts it was given (below).
 - Shows no synopsis and no spoiler-flagged tags. Filters: episode count, release year, community
   score.
 
@@ -93,7 +94,23 @@ not beat plain popularity on the full catalog.
   entries were not in the index.
 - Related titles linked only as `OTHER`, and TV side stories, count as separate franchises, so a
   sequel can be recommended to someone who liked the first series.
-- No LLM-written explanations yet. The "because you liked" line is the list of closest liked titles.
+- The optional one-sentence explanations are checked for what they name, not for tone or usefulness, and a spoiler that is not in my spoiler-tag list would pass. They go through a free hosted model, so the hosted page will often fall back to a plain template.
+
+## Explanations
+
+Each pick can get one sentence saying why it fits, written by a language model. The model is given
+only the pick's genres and tags and the ones it shares with your liked titles, never a synopsis or
+a spoiler-flagged tag, and must mark every title and attribute it uses so code can check them.
+A sentence that names a title or attribute that was not supplied, mentions another title, includes
+a spoiler-flagged tag or uses a stray number is thrown away and replaced by a plain template built
+from the same facts. Nothing unchecked is shown.
+
+On 10 development users (100 picks), 98 sentences passed the check on the final run. The two that
+failed were a sentence containing a spoiler-flagged term, which the model produced from its own
+knowledge of the show, and one with an attribute that was not in the supplied list. The check limits what can be
+claimed, not whether the sentence is good, and it only knows the spoiler terms in my list.
+`python src/eval_explanations.py --users-dir data/eval_users` reproduces the measurement
+(needs an `LLM_API_KEY`).
 
 ## Run it
 
@@ -116,7 +133,7 @@ python src/evaluate.py --methods popularity genre minilm@center=1@knn=10@genre=1
 pytest
 ```
 
-MyAnimeList lists need a free client ID in `MAL_CLIENT_ID` (environment or `.env`; a Streamlit
+Explanations need `LLM_API_KEY` (any OpenAI-compatible provider; the default is Groq's free tier). MyAnimeList lists need a free client ID in `MAL_CLIENT_ID` (environment or `.env`; a Streamlit
 secret when hosted). AniList needs no key.
 
 ## Data and privacy

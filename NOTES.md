@@ -3,6 +3,35 @@
 A running log of what I tried, what surprised me, and what I changed.
 Newest entries go at the top. This becomes the "What failed and what I'd change" section of the README.
 
+## 2026-11-26 (Step 9): checked language-model explanations
+
+**What I did**
+- `explain.py`: one sentence per pick from a hosted model (Groq's free tier, `openai/gpt-oss-120b`). The model sees only the pick's title, format, year, episode count, visible genres and tags, and the attributes it shares with the liked titles that led to it. No synopsis and no spoiler-flagged tags. It must put titles in `[[ ]]` and genres or tags in `{{ }}`, so every claim can be checked by code.
+- The checker rejects a sentence that names no liked title, names a title that is not in the facts, mentions any other catalog title, cites an attribute that is not in the pick's list, contains one of the pick's spoiler-flagged tags, uses a number other than the year or episode count, or is over 40 words. A rejected sentence, a bad reply, a rate limit or a missing key all give a template built from the same facts, which passes the same check (tested). The page never shows an unchecked sentence.
+- `eval_explanations.py` measures how often sentences pass, with calls and sentences counted separately.
+
+**Results (10 of the 25 dev users, 10 picks each, one model call per user)**
+- Final run: 10 of 10 calls worked and 98 of 100 sentences passed the check. The two failures were one sentence containing a spoiler-flagged term and one citing an attribute that was not in the supplied list. Both were replaced by the template.
+- Earlier runs, kept because they changed the code: 19 of 25 calls failed on the first full run (12 rate limits, 7 unusable replies), which left 190 of 250 picks with no sentence. After pausing longer, 3 of 10 calls were cut off at the token limit.
+
+**What failed or was wrong**
+- My first summary mixed provider failures into the sentence pass rate and reported 22.4%. The sentences were fine; the provider calls were failing. The tally now keeps the two apart.
+- My checker flagged digits inside verified titles and tags (a liked title like Mob Psycho 100), so it rejected correct sentences. Fixed, with tests.
+- The token cut-offs went away after I set the model's reasoning effort to low, which is the likely cause (the model's thinking shares the reply's token budget). I changed that and the checker in the same step, so I cannot say how much each contributed to the final pass rate.
+
+**What surprised me**
+- One sentence contained a spoiler-flagged term even though the model was never shown it. It must have come from the model's own knowledge of the show. The check caught it only because that term is in my spoiler-tag list.
+
+**Caveats**
+- The check limits what the model can name. It does not check tone or whether a sentence helps: words like "intense" or "vibrant" pass. A spoiler that is not in my spoiler-tag list would also pass.
+- 100 sentences from 10 users is a small sample, and these are the development users, not the held-out ones.
+- A free tier is shared by everyone who uses the hosted page, so it will often fall back to the template.
+- The liked titles of the person using the page are sent to the model provider.
+
+**Next**
+- Read a sample of passing sentences by hand and note how many are misleading or empty, since the pass rate cannot show that.
+- Decide whether to turn the checkbox on for the hosted page.
+
 ## 2026-11-25 (Step 8): live recommender, demo page and first deployment
 
 **What I did**

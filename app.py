@@ -14,6 +14,7 @@ PROFILE_CACHE = Path(tempfile.gettempdir()) / "animatch_profiles"
 
 import streamlit as st  # noqa: E402
 
+import explain  # noqa: E402
 import parsers  # noqa: E402
 import recommend  # noqa: E402
 import scoring  # noqa: E402
@@ -29,7 +30,8 @@ def load_catalog():
     matrices("minilm", "base")      # read the stored vectors once, not on every click
     matrices("genre", "base")
     records = list(index["by_anilist"].values())
-    return index, catalog, matrices, recommend.entry_points(records), recommend.retelling_links(records)
+    return (index, catalog, matrices, recommend.entry_points(records), recommend.retelling_links(records),
+            explain.Facts(records), explain.load_spoiler_terms(RUNTIME / "spoiler_tags.json"))
 
 
 @st.cache_data(ttl=3600, show_spinner="Reading the watchlist...")
@@ -37,7 +39,7 @@ def load_profile(platform, username):
     return parsers.get_profile(platform, username, cache_dir=PROFILE_CACHE)
 
 
-def render(recs):
+def render(recs, notes=None):
     if not recs:
         st.info("Nothing matches these limits. Try loosening them.")
     for i, r in enumerate(recs, 1):
@@ -52,7 +54,13 @@ def render(recs):
             text.caption(f"{year} · {r['format']} · {eps}{score}")
             if r["planned"]:
                 text.markdown(":blue[On your plan-to-watch list]")
-            text.markdown("Because you liked: " + ", ".join(t for t, _ in r["because"]))
+            if notes:
+                n = notes[i - 1]
+                text.markdown(explain.render(n["text"]))
+                text.caption("Written by a language model from genres and tags, and checked"
+                             if n["source"] == "model" else "Plain explanation from genres and tags")
+            else:
+                text.markdown("Because you liked: " + ", ".join(t for t, _ in r["because"]))
 
 
 st.title("AniMatch AI")
@@ -84,6 +92,14 @@ with st.sidebar:
     hide_planned = st.checkbox("Also hide my plan-to-watch titles")
     keep_retellings = st.checkbox("Keep other versions of things I have seen")
     k = st.slider("How many", 5, 30, 10)
+    llm = explain.get_llm_config()
+    use_ai = False
+    if llm:
+        use_ai = st.checkbox("Short explanations", help="Each pick gets one sentence built from genres and tags "
+                                                        "it shares with your favourites. A language model writes "
+                                                        "it, a checker verifies it, and a plain template is used "
+                                                        "if the check fails. Titles you liked are sent to the "
+                                                        "model provider to write it.")
 
 if not username:
     st.write("Enter a username in the sidebar to start.")
@@ -101,7 +117,7 @@ except parsers.ProfileError as e:
     st.error(f"Could not read the list: {e}")
     st.stop()
 
-index, catalog, matrices, starts, links = load_catalog()
+index, catalog, matrices, starts, links, facts, spoiler_terms = load_catalog()
 matched, unmatched = parsers.match_to_index(entries, index)
 st.write(f"{len(entries)} entries, {len(matched)} in the index, {len(unmatched)} not (ignored).")
 
@@ -128,13 +144,24 @@ with st.expander("What the recommender learned about you"):
     if neg:
         st.write("Strongest dislikes: " + ", ".join(o.title for o in neg[:5]))
 
+def notes_for(recs):
+    """Explanations for a list, or None when they are off (or cannot be checked)."""
+    if not (use_ai and spoiler_terms is not None and recs):
+        return None
+    notes, error = explain.explain_picks(recs, facts, spoiler_terms, llm)
+    if error:
+        st.caption(f"The language model was not used this time ({error}); showing plain explanations.")
+    return notes
+
+
 if compare:
     left, right = st.columns(2)
     with left:
         st.subheader("Your list")
-        render(recs)
+        render(recs, notes_for(recs))
     with right:
         st.subheader(f"Deeper cuts (no top {skip})")
-        render(run(skip)[1])
+        deeper = run(skip)[1]
+        render(deeper, notes_for(deeper))
 else:
-    render(recs)
+    render(recs, notes_for(recs))

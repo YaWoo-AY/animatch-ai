@@ -110,7 +110,9 @@ def recommend(matched, catalog, matrices, spec=scoring.DEFAULT_SPEC, k=10, limit
     for i in order:
         fid = int(catalog.franchise_ids[i])
         meta = dict(starts[fid])
-        meta["because"] = taste.explain(model, mat[catalog.aid_row[meta["anilist_id"]]])
+        near = taste.nearest_liked(model, mat[catalog.aid_row[meta["anilist_id"]]])
+        meta["because"] = [(o.title, sim) for o, sim in near]
+        meta["because_franchises"] = [o.franchise_id for o, _ in near]
         meta["planned"] = fid in planned
         recs.append(meta)
     return model, recs
