@@ -147,14 +147,15 @@ def paired_difference(ranks, a, b, k=10, seed=0):
 
 
 def print_table(summary, ks=(10, 50)):
-    head = f"{'method':<26}" + "".join(f"{f'Recall@{k} [95% CI]':>26}" for k in ks) + f"{'MRR':>8}{'median rank':>13}"
+    w = max(26, max(len(m) for m in summary) + 2)
+    head = f"{'method':<{w}}" + "".join(f"{f'Recall@{k} [95% CI]':>26}" for k in ks) + f"{'MRR':>8}{'median rank':>13}"
     print("\n" + head)
     for m, row in summary.items():
         cells = ""
         for k in ks:
             mean, lo, hi = row[f"recall@{k}"]
             cells += f"{f'{mean:.3f} [{lo:.3f}-{hi:.3f}]':>26}"
-        print(f"{m:<26}{cells}{row['mrr'][0]:>8.4f}{row['median_rank']:>13.0f}")
+        print(f"{m:<{w}}{cells}{row['mrr'][0]:>8.4f}{row['median_rank']:>13.0f}")
 
 
 def main():
@@ -166,7 +167,8 @@ def main():
     ap.add_argument("--methods", nargs="+", default=["random", "popularity", "genre", "minilm"])
     ap.add_argument("--per-user", type=int, default=20, help="hidden franchises per user (caps heavy users)")
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--compare-to", default="popularity", help="method for the paired comparison")
+    ap.add_argument("--compare-to", nargs="+", default=["popularity"],
+                    help="method(s) for the paired comparison; one table per method")
     ap.add_argument("--users-dir", default=str(USERS_DIR),
                     help="users to evaluate (default data/eval_users, the dev set; data/test_users is the final test)")
     ap.add_argument("--tail", type=int, default=0,
@@ -192,13 +194,17 @@ def main():
     if any(fallbacks.values()):
         print("\nTrials with nothing positive to learn from (fell back to popularity):",
               {m: n for m, n in fallbacks.items() if n})
-    if args.compare_to in ranks:
-        print(f"\nRecall@10 minus {args.compare_to}, paired by user (95% CI over users):")
+    width = max(26, max(len(m) for m in ranks) + 2)
+    for ref in args.compare_to:
+        if ref not in ranks:
+            print(f"\n(--compare-to {ref}: not one of the methods run, skipped)")
+            continue
+        print(f"\nRecall@10 minus {ref}, paired by user (95% CI over users):")
         for m in ranks:
-            if m != args.compare_to:
-                d, lo, hi = paired_difference(ranks, m, args.compare_to, seed=args.seed)
+            if m != ref:
+                d, lo, hi = paired_difference(ranks, m, ref, seed=args.seed)
                 verdict = "clearly better" if lo > 0 else "clearly worse" if hi < 0 else "not clearly different"
-                print(f"  {m:<26}{d:+.3f} [{lo:+.3f}, {hi:+.3f}]  {verdict}")
+                print(f"  {m:<{width}}{d:+.3f} [{lo:+.3f}, {hi:+.3f}]  {verdict}")
     print(f"\n{sum(s['trials'] for s in summary.values()) // len(summary)} hidden franchises per method, "
           f"{time.time() - started:.0f}s.")
     if args.save:
